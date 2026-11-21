@@ -2,8 +2,6 @@
 
 -- الأدوار القياسية من المنصة (tenant_id NULL). الصلاحيات بصيغة مورد:فعل، و'*' للمالك.
 ALTER TABLE org.role ADD CONSTRAINT role_code_unique UNIQUE NULLS NOT DISTINCT (tenant_id, code);
--- المالك يتجاوز RLS مؤقتًا لإدخال صفوف المنصة (tenant_id NULL)
-ALTER TABLE org.role NO FORCE ROW LEVEL SECURITY;
 INSERT INTO org.role (id, tenant_id, code, permissions) VALUES
  ('00000000-0000-4000-8000-000000000001', NULL, 'owner',             ARRAY['*']),
  ('00000000-0000-4000-8000-000000000002', NULL, 'admin',             ARRAY['org:read','org:write','members:read','members:write','tasks:read','tasks:write','tasks:assign','fleet:read','fleet:write','billing:read','reports:read']),
@@ -12,7 +10,6 @@ INSERT INTO org.role (id, tenant_id, code, permissions) VALUES
  ('00000000-0000-4000-8000-000000000005', NULL, 'branch_supervisor', ARRAY['org:read','tasks:read','tasks:write','tasks:assign','fleet:read','members:read']),
  ('00000000-0000-4000-8000-000000000006', NULL, 'driver',            ARRAY['tasks:read_own','tasks:update_own','shift:own']),
  ('00000000-0000-4000-8000-000000000007', NULL, 'customer',          ARRAY['portal:own']);
-ALTER TABLE org.role FORCE ROW LEVEL SECURITY;
 
 -- عضوية واحدة نشطة لكل مستخدم في كل مؤسسة (تغيير الدور = تعديل العضوية)
 ALTER TABLE org.membership DROP CONSTRAINT membership_tenant_id_user_id_role_id_key;

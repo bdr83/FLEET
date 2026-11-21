@@ -9,9 +9,12 @@ import { AuthGuard } from './auth/auth.guard';
 import { TenantsController } from './tenants/tenants.controller';
 import { MembersController } from './members/members.controller';
 import { OrgController } from './org/org.controller';
+import { AssetsController } from './fleet/assets.controller';
+import { WorkersController } from './fleet/workers.controller';
+import { DocumentsController } from './fleet/documents.controller';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, TasksController],
   providers: [
     DbService,
     OtpService,

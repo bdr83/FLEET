@@ -33,6 +33,26 @@
 
 owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driver، customer. التفاصيل في `db/migrations/0005_identity.sql`.
 
+## الأسطول والسائقون (P2)
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET | `/assets?status=&type=&branch_id=` | fleet:read | المركبات والمعدات ضمن نطاق المستخدم |
+| GET | `/assets/:id` | fleet:read | 404 إذا كانت خارج النطاق |
+| POST | `/assets` | fleet:write | `{legal_entity_id, asset_type, plate_no?, branch_id?, make?, model?, year?, vin?, odometer_km?, capacity?, notes?}` |
+| PATCH | `/assets/:id` | fleet:write | العدّاد لا يرجع للخلف، رقم اللوحة فريد داخل المؤسسة |
+| GET | `/workers?status=&kind=` | fleet:read | السائقون والمناديب والفنيون |
+| GET | `/workers/:id` | fleet:read | |
+| POST | `/workers` | fleet:write | `{legal_entity_id, kind, display_name, phone?, branch_id?}`. مع رقم الهاتف تُنشأ عضوية driver تلقائيًا ليدخل تطبيق السائق |
+| PATCH | `/workers/:id` | fleet:write | `status: left` يلغي عضوية السائق وجلساته فورًا |
+| GET | `/documents?asset_id=&worker_id=` | fleet:read | الوثائق السارية |
+| GET | `/documents/expiring?days=30` | fleet:read | المنتهية والتي تنتهي خلال N يومًا، مع `days_left` و`state` |
+| POST | `/documents` | fleet:write | `{doc_type, asset_id XOR worker_id, number?, issued_on?, expires_on?}`. تأخذ شركة المالك تلقائيًا |
+| DELETE | `/documents/:id` | fleet:write | أرشفة |
+
+أنواع المركبات: car, motorbike, van, pickup, truck, mixer, pump, trailer, bus, other.
+أنواع الوثائق: driving_license, vehicle_registration, insurance, civil_id, residency, work_permit, inspection, other. [تحقق محلي] قائمة الوثائق الإلزامية لكل نشاط في الكويت.
+
 ## المهام (مؤقت حتى P4)
 
 `GET /tasks`، `GET /tasks/:id`، `POST /tasks`.
