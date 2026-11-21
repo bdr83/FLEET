@@ -21,10 +21,12 @@ import { ContractsController } from './crm/contracts.controller';
 import { PortalController } from './crm/portal.controller';
 import { MaintenanceController } from './maint/maintenance.controller';
 import { ExpensesController } from './maint/expenses.controller';
+import { InvoicesController } from './billing/invoices.controller';
+import { PaymentsController } from './billing/payments.controller';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, TasksController],
   providers: [
     DbService,
     OtpService,

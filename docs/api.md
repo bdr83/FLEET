@@ -160,3 +160,35 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 قواعد:
 - أمر العمل بـ `out_of_service` يوقف المركبة فلا تُستخدم في مناوبة ولا تُسند لمهمة، وتعود للخدمة عند إغلاق آخر أمر يوقفها.
 - العدّاد لا يرجع للخلف في أي مسار.
+
+## الفواتير والتحصيل والذمم والقيود (P8)
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| PATCH | `/legal-entities/:id/billing` | org:write | `{tax_rate, tax_number, invoice_prefix}`. الضريبة صفر افتراضيًا وتضبطها الشركة [تحقق محلي] |
+| GET | `/invoices?customer_id=&status=` | billing:read | |
+| GET | `/invoices/:id` | billing:read | مع البنود والدفعات المخصصة لها |
+| POST | `/invoices` | billing:write | `{customer_id, period_from, period_to}` مسودة من المهام المراجَعة غير المفوترة، مسعّرة بعقد كل مهمة، مع قائمة `skipped` لما تعذّر تسعيره |
+| POST | `/invoices/:id/lines` | billing:write | بند يدوي على المسودة |
+| POST | `/invoices/:id/lines/:lineId/remove` | billing:write | يزيل بنود المهمة كلها فتعود لطابور الفوترة |
+| POST | `/invoices/:id/issue` | billing:write | رقم متسلسل بلا فجوات لكل شركة وسنة، تاريخ الاستحقاق من شروط العقد، المهام تصبح invoiced، وقيد: مدين الذمم، دائن الإيراد والضريبة |
+| POST | `/invoices/:id/void` | billing:write | `{reason}`. للمسودة أو الفاتورة غير المدفوعة: قيد عكسي وتعود المهام "مراجَعة" |
+| POST | `/payments` | billing:write | `{customer_id, amount, method, allocations?, reference?}`. بلا تخصيص يُخصَّص للأقدم استحقاقًا، والباقي رصيد دائن للعميل |
+| GET | `/payments?customer_id=` | billing:read | مع غير المخصص |
+| POST | `/payments/:id/reverse` | billing:write | شيك مرتجع أو خطأ: قيد عكسي وتُفتح الفواتير |
+| GET | `/receivables/aging?as_of=` | billing:read | لكل عميل: جاري، 1-30، 31-60، 61-90، أكثر من 90، الرصيد الدائن، وتجاوز حد الائتمان |
+| GET | `/customers/:id/statement?from=&to=` | billing:read | كشف حساب: رصيد افتتاحي، الحركات برصيد متراكم، رصيد ختامي |
+| POST | `/driver/cod` | tasks:update_own | السائق يسجل المبلغ المحصّل من المستلم `{client_op_id, task_id, amount}` |
+| GET | `/cod/custody` | billing:read | ما في عهدة كل سائق |
+| POST | `/cod/deposits` | billing:write | تسليم السائق النقد للمكتب، لا يتجاوز عهدته |
+| GET | `/cod/payable` | billing:read | المستحق لكل عميل من مبالغ COD |
+| POST | `/cod/payouts` | billing:write | تحويل المبالغ للعميل، أو تسويتها بفاتورته عبر دفعة `method: cod_offset` |
+| GET | `/ledger/trial-balance?legal_entity_id=&as_of=` | billing:read | ميزان المراجعة |
+
+دليل الحسابات الأولي [تخمين، يُراجع مع محاسب كل عميل]: 1000 الصندوق، 1010 البنك، 1050 عهدة السائقين، 1100 ذمم العملاء، 2000 مصروفات مستحقة، 2010 مستحقات السائقين، 2200 ضريبة مستحقة، 2300 مبالغ COD للعملاء، 4000 الإيراد، 5010 إلى 5990 المصروفات حسب الفئة.
+
+قواعد:
+- الدفتر للإضافة فقط: لا تعديل ولا حذف، والتصحيح بقيد عكسي. كل قيد متوازن لكل عملة ولشركة قانونية واحدة، ويُفحص في قاعدة البيانات عند الحفظ.
+- الفاتورة الصادرة لا تُعدَّل، والمهمة لا تظهر في فاتورتين.
+- المصروف المعتمد يُقيَّد تلقائيًا: مطالبة السائق دائنة لحسابه (2010)، ومصروف المكتب دائن للمصروفات المستحقة (2000).
+- المنصة لا تحتفظ بأموال (D5): مبالغ COD والدفعات سجلات لأموال تحتفظ بها الشركة المشتركة نفسها.

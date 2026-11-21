@@ -8,6 +8,7 @@ import { audit } from '../common/audit';
 import { pgToHttp, v } from '../common/validate';
 import { CsvResponse, parseRange, respond } from '../reports/report-utils';
 import { MAX_AGE_MS, MAX_AHEAD_MS } from '../driver/driver.controller';
+import { postExpense } from '../billing/ledger';
 
 export const EXPENSE_CATEGORIES = ['fuel', 'maintenance', 'tires', 'insurance', 'registration', 'fines', 'tolls', 'parking', 'washing', 'other'] as const;
 /** What a driver may claim from the app. Fines, insurance and the like are entered by the office. */
@@ -81,6 +82,7 @@ export class ExpensesController {
       } catch (e) { return pgToHttp(e); }
       if (!(await c.query('SELECT 1 FROM maint.expense WHERE id = $1', [id])).rowCount) throw new BadRequestException('unknown legal_entity_id');
       if (assetId && odo !== null) await c.query('UPDATE fleet.asset SET odometer_km = GREATEST(COALESCE(odometer_km, 0), $2) WHERE id = $1', [assetId, odo]);
+      await postExpense(c, a.tenantId, id);
       const row = await this.load(c, id);
       await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: 'expense.created', targetType: 'expense', targetId: id, after: row });
       return row;
@@ -111,6 +113,7 @@ export class ExpensesController {
       if (status === 'approved' && e.asset_id && e.odometer_km !== null) {
         await c.query('UPDATE fleet.asset SET odometer_km = GREATEST(COALESCE(odometer_km, 0), $2) WHERE id = $1', [e.asset_id, e.odometer_km]);
       }
+      if (status === 'approved') await postExpense(c, a.tenantId, id);
       await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: `expense.${status}`, targetType: 'expense', targetId: id, after: { reason } });
       return this.load(c, id);
     });

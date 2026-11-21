@@ -6,6 +6,7 @@ import { Auth } from '../auth/auth.decorator';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { pgToHttp, v } from '../common/validate';
+import { postExpense } from '../billing/ledger';
 
 const PLAN_COLS = `p.id, p.asset_id, a.plate_no, p.name, p.interval_km, p.interval_days, p.last_done_km, p.last_done_on::text, p.active`;
 const WO_COLS = `w.id, w.number, w.asset_id, a.plate_no, w.plan_id, w.kind, w.status, w.out_of_service, w.description, w.vendor,
@@ -197,12 +198,14 @@ export class MaintenanceController {
       await this.release(c, w);
       const total = (await c.query('SELECT COALESCE(sum(amount), 0) AS t FROM maint.work_order_line WHERE work_order_id = $1', [id])).rows[0].t;
       if (Number(total) > 0) {
+        const expenseId = randomUUID();
         await c.query(
           `INSERT INTO maint.expense (id, tenant_id, legal_entity_id, category, amount, currency, spent_at, asset_id, work_order_id, odometer_km, vendor, note,
                                       status, submitted_by, decided_by, decided_at)
            SELECT $1, $2, w.legal_entity_id, 'maintenance', $3, le.currency, now(), w.asset_id, w.id, $4, w.vendor, w.number, 'approved', $5, $5, now()
              FROM maint.work_order w JOIN org.legal_entity le ON le.id = w.legal_entity_id WHERE w.id = $6`,
-          [randomUUID(), a.tenantId, total, km, a.userId, id]);
+          [expenseId, a.tenantId, total, km, a.userId, id]);
+        await postExpense(c, a.tenantId, expenseId);
       }
       const row = await this.loadWo(c, id);
       await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: 'work_order.completed', targetType: 'work_order', targetId: id, after: row });
