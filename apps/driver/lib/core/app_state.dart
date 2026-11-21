@@ -181,7 +181,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> milestone(String taskId, String code) async {
     final p = await tracker.current();
-    _local(taskId, (t) => t.copyWith(stage: code));
+    // batching starts the concrete age clock: show it at once, the server keeps its own time from this op
+    _local(taskId, (t) => t.copyWith(stage: code,
+        ticket: t.isConcrete && code == 'loaded' && t.batchedAt == null ? {...t.ticket!, 'batched_at': nowIso()} : null));
     await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
   }
 
@@ -205,6 +207,29 @@ class AppState extends ChangeNotifier {
     });
     _local(taskId, (t) => t.copyWith(hasProof: true));
     unawaited(queue.flush());
+  }
+
+  /// The site engineer signs the concrete delivery ticket: poured and returned m³, with an optional photo of the
+  /// signature or paper ticket. Online without a photo the server answers at once, so a refusal shows on the screen.
+  Future<String?> signTicket(String taskId, {required double poured, required double returned, required String signedBy, Uint8List? jpeg}) async {
+    final fields = {'poured_m3': poured, 'returned_m3': returned, 'signed_by': signedBy};
+    if (jpeg != null) {
+      await queue.add({
+        'kind': 'photo', 'task_id': taskId, 'upload_op': newOpId(), 'pod_op': newOpId(), 'then': 'ticket', 'fields': fields,
+        'b64': base64Encode(jpeg), 'content_type': 'image/jpeg', 'occurred_at': nowIso(),
+      });
+      _local(taskId, (t) => t.copyWith(hasProof: true));
+      unawaited(queue.flush());
+      return null;
+    }
+    final r = await _syncOp(taskId, {'type': 'ticket', ...fields}, wait: true);
+    if (r != null && !r.ok) {
+      queue.problems.removeWhere((p) => p.taskId == taskId && p.reason == r.reason);
+      notifyListeners();
+      return rejectReasons[r.reason] ?? r.reason ?? 'رُفضت التذكرة';
+    }
+    _local(taskId, (t) => t.copyWith(hasProof: true));
+    return null;
   }
 
   Future<void> collectCod(String taskId, int fils) async {

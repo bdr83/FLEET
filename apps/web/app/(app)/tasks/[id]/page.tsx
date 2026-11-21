@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { api } from '@/lib/api';
 import { addressLine, dt, KwAddress, money, packLabel, TASK_STATUS } from '@/lib/format';
 import { DeliveryPanel } from '@/components/delivery';
+import { ConcretePanel } from '@/components/concrete';
 import { can, useMe } from '@/components/me';
 import { AssignModal } from '@/components/assign';
 import { ErrorBox, Modal, StatusBadge, useAction, useLoad } from '@/components/ui';
@@ -67,7 +68,7 @@ export default function TaskDetail() {
             <dt>العميل</dt><dd>{t.customer_name ?? '—'}</dd>
             <dt>السائق</dt><dd>{t.worker_name ?? '—'}</dd>
             <dt>المركبة</dt><dd className="num">{t.plate_no ?? '—'}</dd>
-            {Object.entries(t.attributes ?? {}).filter(([k]) => !(k === 'address' && t.attributes?.dropoff)).map(([k, val]) => (
+            {Object.entries(t.attributes ?? {}).filter(([k]) => t.sector_pack === 'concrete@1' ? k === 'address' : !(k === 'address' && t.attributes?.dropoff)).map(([k, val]) => (
               <Attr key={k} k={k} v={val} />
             ))}
             <dt>أُنشئت</dt><dd className="num">{dt(t.created_at)}</dd>
@@ -85,6 +86,7 @@ export default function TaskDetail() {
             ))}
           </ul>
         </section>
+        {t.sector_pack === 'concrete@1' && <ConcretePanel taskId={t.id} status={t.status} />}
         {t.sector_pack === 'delivery@1' && <DeliveryPanel taskId={t.id} status={t.status} onChange={() => void task.reload()} />}
       </div>
       {assigning && <AssignModal task={t} onClose={() => setAssigning(false)} onDone={() => { setAssigning(false); void task.reload(); }} />}

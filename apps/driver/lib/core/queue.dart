@@ -51,7 +51,8 @@ class OpResult {
 /// Offline-first action queue. Every action carries a client_op_id, is kept on the phone until the
 /// server answers, and is sent in order. The server ignores repeats, so re-sending after a lost answer is safe.
 ///
-/// Kinds: sync (an op for /v1/driver/sync), cod (cash collected), photo (upload a proof photo, then its pod op).
+/// Kinds: sync (an op for /v1/driver/sync), cod (cash collected), photo (upload a photo, then its pod op, or its
+/// ticket op when then = 'ticket').
 class OpQueue {
   OpQueue(this.api, this.store);
   final Api api;
@@ -102,7 +103,18 @@ class OpQueue {
           final up = await api.upload('/v1/driver/files?purpose=pod&client_op_id=${head['upload_op']}',
               base64Decode(head['b64']), head['content_type']);
           // the pod op takes the photo's place in the queue, keeping the order (pod before "completed")
-          _entries[0] = {
+          _entries[0] = head['then'] == 'ticket' ? {
+            'kind': 'sync',
+            'task_id': head['task_id'],
+            'op': {
+              'type': 'ticket',
+              'client_op_id': head['pod_op'],
+              'task_id': head['task_id'],
+              ...Map<String, dynamic>.from(head['fields'] as Map),
+              'file_key': up['file_key'],
+              'occurred_at': head['occurred_at'],
+            },
+          } : {
             'kind': 'sync',
             'task_id': head['task_id'],
             'op': {

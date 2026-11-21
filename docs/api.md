@@ -209,3 +209,25 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | GET | `/public/track/:token` | بلا دخول | صفحة المستلم: الحالة والمرحلة واسم الشركة والمنطقة، والرمز ما دام الطلب نشطًا، واسم المندوب الأول، وموقعه التقريبي فقط بعد الاستلام وأثناء الطريق. لا أرقام هواتف |
 
 في `/driver/sync` أنواع إضافية: `milestone {code: at_pickup|picked_up|at_dropoff|returned_to_sender, lat?, lng?}`، و`pod {method: pin|photo|signature, pin?, file_key?, recipient_name?}`. الرمز الخاطئ يُرفض `wrong_pin` ويُقفل بعد 5 محاولات `pin_locked`. إكمال طلب له جوال مستلم يحتاج إثباتًا `proof_required` (حسب الإعداد). الفشل يقبل `reason_code` من: recipient_absent, wrong_address, recipient_refused, unreachable, damaged, cod_not_paid, customer_canceled, other. `GET /driver/tasks?include=returns` يضيف الطلبات الفاشلة التي لم تُرجع بعد.
+
+## قطاع الخرسانة الجاهزة concrete@1 (القطاع 20)
+
+طلب الصب يُقسّم إلى حمولات بسعة الخلاطة في الإعدادات (حمولات كاملة ثم الباقي). كل حمولة مهمة عادية بنوع `concrete@1` ورقم `REF-n` ونافذة من التحميل حتى عودة الخلاطة، ولها تذكرة في `ops.load_ticket`. حالة الطلب تُشتق من حمولاته: scheduled، in_progress، completed، canceled.
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET/PUT | `/concrete/settings?legal_entity_id=` | tasks:read / org:write | سعة الخلاطة، أقصى عمر للخرسانة وتنبيهه، الانتظار المجاني، زمن الوصول، زمن الدورة [تخمين للقيم الافتراضية] |
+| GET | `/concrete/pours?from&to` | tasks:read | صبّات الفترة (افتراضيًا اليوم وغدًا) مع الإجماليات والحمولات المختصرة |
+| POST | `/concrete/pours` | tasks:write | `{legal_entity_id, ref, customer_id?, site_id?, site{name, area, block, street, plot, lat, lng, contact_name, contact_phone}, mix_code, volume_m3, pour_rate_m3h, pump_required?, pump_asset_id?, scheduled_at, notes?}`؛ إعادة الإرسال بنفس ref تعيد الطلب نفسه |
+| GET | `/concrete/pours/:id` | tasks:read | الطلب والحمولات (الحالة، الخلاطة، المرحلة، العمر، الانتظار، المصبوب والمرتجع) والخطة: الفاصل بين الخلاطات وعددها لصب مستمر (تقدير) |
+| PATCH | `/concrete/pours/:id` | tasks:write | `{version, site_ready?, pump_asset_id?, notes?, site?, scheduled_at?}`؛ تغيير الموعد يعيد توقيت الحمولات غير المحمّلة |
+| POST | `/concrete/pours/:id/adjust` | tasks:write | `{version, volume_m3, reason}` تعديل الكمية بموافقة العميل: تُعدّل أو تُضاف أو تُلغى الحمولات غير المحمّلة، ولا تقل عن المحمّل |
+| POST | `/concrete/pours/:id/cancel` | tasks:write | `{version, reason}` يلغي الحمولات غير المحمّلة |
+| GET | `/concrete/board` | tasks:read | كل خلاطة وحالتها: off، loading، on_road، waiting، pouring، returning، available، مع أرقام اليوم بتوقيت الشركة |
+| GET | `/concrete/exceptions` | tasks:read | عمر الخرسانة فوق التنبيه، انتظار فوق المجاني، حمولات قريبة بلا خلاطة، مواقع متوقفة، مواقع بلا دبوس |
+| GET | `/concrete/waiting?from&to` | reports:read | الانتظار لكل تذكرة موقّعة وإجماليات لكل عميل |
+| GET | `/concrete/tasks/:id` | tasks:read | تذكرة الحمولة وطلب الصب وحدود العمر والانتظار وسبب الفشل |
+
+الإسناد بالواجهة العامة `/tasks/:id/assign` مع `asset_id` الخلاطة. قيد تداخل المركبة يمنع إسناد خلاطة لحمولتين متداخلتين، وعند اكتمال الحمولة أو فشلها تُقصّر نافذتها حتى عودة الخلاطة.
+
+في `/driver/sync`: `milestone {code: loaded|at_site|pour_start|pour_end}` بالترتيب (`stage_out_of_order`، `stage_already_recorded`)، و`loaded` يسجّل وقت الخلط في التذكرة. `ticket {poured_m3, returned_m3?, signed_by, file_key?}` بعد انتهاء الصب فقط؛ المصبوب والمرتجع لا يتجاوزان الحمولة (`quantity_exceeds_load`)، والتذكرة لا تُعدّل بعد التوقيع (`already_signed`، ومحمية في قاعدة البيانات). التوقيع يكتب `attributes.quantities = {m3, hour}` للفاتورة: الساعات = الانتظار بعد المجاني بالربع ساعة. الإكمال يحتاج التذكرة (`proof_required`)، والمراجعة كذلك. أسباب الفشل: site_not_ready, age_exceeded, rejected_by_site, truck_breakdown, pump_breakdown, customer_canceled, other (سبب من قطاع آخر يُرفض `invalid_reason`). `GET /driver/tasks` يضيف `ticket` للحمولات.

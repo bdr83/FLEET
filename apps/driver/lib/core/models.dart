@@ -44,6 +44,7 @@ class DriverTask {
     this.stage,
     this.hasProof = false,
     this.taskRef,
+    this.ticket,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -52,6 +53,8 @@ class DriverTask {
   final DateTime? windowFrom, windowTo;
   final String? stage;
   final bool hasProof;
+  /// Concrete loads: the delivery ticket (ticket_no, volume_m3, batched_at, signed, planned_arrival, site_ready, mix_code).
+  final Map<String, dynamic>? ticket;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -64,10 +67,11 @@ class DriverTask {
         stage: j['stage'],
         hasProof: j['has_proof'] == true,
         taskRef: j['ref'],
+        ticket: _map(j['ticket']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -78,14 +82,25 @@ class DriverTask {
         stage: stage ?? this.stage,
         hasProof: hasProof ?? this.hasProof,
         taskRef: taskRef,
+        ticket: ticket ?? this.ticket,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
+  /// A concrete load planned from a pour order (it has a ticket). A bare concrete@1 task keeps the simple flow.
+  bool get isConcrete => sectorPack == 'concrete@1' && ticket != null;
+  String? get ticketNo => ticket?['ticket_no'] as String? ?? attributes['ticket_no'] as String?;
+  double get volumeM3 => _num(ticket?['volume_m3']) ?? _num(attributes['volume_m3']) ?? 0;
+  String? get mixCode => ticket?['mix_code'] as String? ?? attributes['mix_code'] as String?;
+  DateTime? get batchedAt => ticket?['batched_at'] == null ? null : DateTime.tryParse(ticket!['batched_at']);
+  DateTime? get plannedArrival => (ticket?['planned_arrival'] ?? attributes['planned_arrival']) is String ? DateTime.tryParse(ticket?['planned_arrival'] ?? attributes['planned_arrival']) : null;
+  bool get siteReady => ticket?['site_ready'] != false;
+  String? get siteContact => dropoff?['contact_name'] as String?;
+  String? get sitePhone => dropoff?['contact_phone'] as String?;
   Map<String, dynamic>? get dropoff => _map(attributes['dropoff']);
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -101,6 +116,27 @@ class DriverTask {
 }
 
 Map<String, dynamic>? _map(Object? v) => v is Map ? Map<String, dynamic>.from(v) : null;
+double? _num(Object? v) => v is num ? v.toDouble() : v is String ? double.tryParse(v) : null;
+
+/// "8.5" / "8,5" / "٨٫٥" → 8.5 with up to 2 decimals, or null.
+double? parseM3(String s) {
+  const ar = '٠١٢٣٤٥٦٧٨٩';
+  var t = s.trim().replaceAll('٫', '.').replaceAll(',', '.');
+  for (var i = 0; i < 10; i++) {
+    t = t.replaceAll(ar[i], '$i');
+  }
+  if (!RegExp(r'^\d{1,2}(\.\d{1,2})?$').hasMatch(t)) return null;
+  return double.parse(t);
+}
+
+/// Checks a ticket before it is queued: the same rule the server applies (poured + returned ≤ load + 0.05 m³).
+String? ticketError(double load, double? poured, double? returned, String signedBy) {
+  if (poured == null) return 'أدخل الكمية المصبوبة';
+  if (returned == null) return 'أدخل الكمية المرتجعة (0 إن لم يوجد)';
+  if (poured + returned > load + 0.05) return 'المصبوب والمرتجع أكثر من حمولة الخلاطة';
+  if (signedBy.trim().isEmpty) return 'اكتب اسم مهندس الموقع';
+  return null;
+}
 
 /// "السالمية، ق 5، ش 10، م 12" — same format as the API and the dashboard.
 String? addressLine(Map<String, dynamic>? a) {
@@ -130,9 +166,10 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned }
+enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket }
 
 List<TaskAction> nextActions(DriverTask t) {
+  if (t.isConcrete) return _concreteActions(t);
   switch (t.status) {
     case 'assigned':
       return [TaskAction.accept];
@@ -152,6 +189,42 @@ List<TaskAction> nextActions(DriverTask t) {
       return [];
   }
 }
+
+/// Mixer trip: loaded at the plant → heading out → on site → pour start → pour end → signed ticket → done.
+List<TaskAction> _concreteActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return t.stage == null ? [TaskAction.loaded] : [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        null => [TaskAction.loaded, TaskAction.fail],
+        'loaded' => [TaskAction.atSite, TaskAction.fail],
+        'at_site' => [TaskAction.pourStart, TaskAction.fail],
+        'pour_start' => [TaskAction.pourEnd],
+        _ => t.hasProof ? [TaskAction.complete] : [TaskAction.ticket],
+      };
+    default:
+      return [];
+  }
+}
+
+/// The button text, worded for the kind of task.
+String actionLabel(DriverTask t, TaskAction a) =>
+    t.isConcrete ? (concreteActionLabels[a] ?? actionLabels[a]!) : actionLabels[a]!;
+
+const concreteActionLabels = {
+  TaskAction.accept: 'قبول الحمولة',
+  TaskAction.loaded: 'تم التحميل من المحطة',
+  TaskAction.start: 'انطلقت إلى الموقع',
+  TaskAction.atSite: 'وصلت للموقع',
+  TaskAction.pourStart: 'بدأ الصب',
+  TaskAction.pourEnd: 'انتهى الصب',
+  TaskAction.ticket: 'توقيع تذكرة التسليم',
+  TaskAction.complete: 'إنهاء الحمولة',
+  TaskAction.fail: 'تعذّر التسليم',
+};
 
 const actionLabels = {
   TaskAction.accept: 'قبول المهمة',
@@ -178,6 +251,21 @@ const stageLabels = {
   'picked_up': 'استلم الشحنة',
   'at_dropoff': 'عند المستلم',
   'returned_to_sender': 'أُعيدت للمرسل',
+  'loaded': 'محمّلة',
+  'at_site': 'في الموقع',
+  'pour_start': 'جارٍ الصب',
+  'pour_end': 'انتهى الصب',
+};
+
+/// Same codes as the API (concrete FAIL_REASONS).
+const concreteFailReasons = {
+  'site_not_ready': 'الموقع غير جاهز',
+  'age_exceeded': 'تجاوزت الخرسانة العمر المسموح',
+  'rejected_by_site': 'رفضها مهندس الموقع',
+  'truck_breakdown': 'عطل في الخلاطة',
+  'pump_breakdown': 'عطل في المضخة',
+  'customer_canceled': 'ألغى العميل',
+  'other': 'سبب آخر',
 };
 
 /// Same codes as the API (FAIL_REASONS).
@@ -205,4 +293,9 @@ const rejectReasons = {
   'bad_time': 'وقت الجهاز غير صحيح، اضبط الساعة',
   'no_pin': 'لا يوجد رمز لهذه المهمة',
   'not_supported': 'غير متاح لهذا النوع من المهام',
+  'stage_out_of_order': 'سجّل المرحلة السابقة أولًا',
+  'stage_already_recorded': 'المرحلة مسجّلة مسبقًا',
+  'already_signed': 'التذكرة موقّعة مسبقًا',
+  'quantity_exceeds_load': 'المصبوب والمرتجع أكثر من حمولة الخلاطة',
+  'invalid_reason': 'سبب غير مناسب لهذا النوع من المهام',
 };

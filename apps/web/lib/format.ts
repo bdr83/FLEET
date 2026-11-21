@@ -134,3 +134,27 @@ export function addressLine(a: KwAddress | null | undefined): string {
     a.floor && `دور ${a.floor}`, a.apartment && `شقة ${a.apartment}`].filter(Boolean);
   return parts.length ? parts.join('، ') : '—';
 }
+
+/** Ready-mix concrete pack (concrete@1) labels. */
+export const CONCRETE_STAGE: Record<string, string> = { loaded: 'تم التحميل', at_site: 'وصل للموقع', pour_start: 'بدأ الصب', pour_end: 'انتهى الصب' };
+Object.assign(STAGE, CONCRETE_STAGE);
+export const CONCRETE_FAIL: Record<string, string> = {
+  site_not_ready: 'الموقع غير جاهز', age_exceeded: 'تجاوز عمر الخرسانة', rejected_by_site: 'رفضها الموقع', truck_breakdown: 'عطل الخلاطة',
+  pump_breakdown: 'عطل المضخة', customer_canceled: 'ألغاه العميل', other: 'سبب آخر',
+};
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(CONCRETE_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+export const POUR_STATE: Record<string, { label: string; tone: string }> = {
+  scheduled: tone('مجدول', 'info'), in_progress: tone('جارٍ الصب', 'warning'), completed: tone('مكتمل', 'success'), canceled: tone('ملغى'),
+};
+export const MIXER_STATE: Record<string, { label: string; tone: string }> = {
+  loading: tone('تحميل', 'primary'), on_road: tone('في الطريق', 'info'), waiting: tone('انتظار بالموقع', 'warning'), pouring: tone('صب', 'warning'),
+  returning: tone('عودة', 'muted'), available: tone('متاحة', 'success'), off: tone('خارج الوردية'),
+};
+export interface ConcreteSite { name?: string; area?: string; block?: string; street?: string; plot?: string; notes?: string; lat?: number; lng?: number; contact_name?: string; contact_phone?: string }
+/** "برج الريم، الشرق، ق 2، قسيمة 15" (same format as the API). */
+export function siteLine(s: ConcreteSite | null | undefined): string {
+  if (!s) return '—';
+  const parts = [s.name, s.area, s.block && `ق ${s.block}`, s.street && `ش ${s.street}`, s.plot && `قسيمة ${s.plot}`].filter(Boolean);
+  return parts.length ? parts.join('، ') : '—';
+}
+export const m3 = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })} م³`);

@@ -56,4 +56,44 @@ void main() {
     }
     expect(failReasons.keys, ['recipient_absent', 'wrong_address', 'recipient_refused', 'unreachable', 'damaged', 'cod_not_paid', 'customer_canceled', 'other']);
   });
+
+  group('concrete loads', () {
+    DriverTask load(String status, {String? stage, bool proof = false}) => DriverTask(
+        id: 'c', status: status, sectorPack: 'concrete@1', version: 1, stage: stage, hasProof: proof,
+        attributes: {'address': 'برج الريم، الشرق', 'volume_m3': 9, 'mix_code': 'C35', 'dropoff': {'lat': 29.37, 'lng': 47.99, 'contact_name': 'م. خالد'}},
+        ticket: {'ticket_no': 'RM-1-1', 'volume_m3': '9.00', 'batched_at': null, 'signed': false, 'site_ready': false});
+
+    test('the mixer trip goes loaded → out → site → pour → ticket → done', () {
+      expect(nextActions(load('assigned')), [TaskAction.accept]);
+      expect(nextActions(load('accepted')), [TaskAction.loaded]);
+      expect(nextActions(load('accepted', stage: 'loaded')), [TaskAction.start]);
+      expect(nextActions(load('in_progress', stage: 'loaded')), [TaskAction.atSite, TaskAction.fail]);
+      expect(nextActions(load('in_progress', stage: 'at_site')), [TaskAction.pourStart, TaskAction.fail]);
+      expect(nextActions(load('in_progress', stage: 'pour_start')), [TaskAction.pourEnd]);
+      expect(nextActions(load('in_progress', stage: 'pour_end')), [TaskAction.ticket]);
+      expect(nextActions(load('in_progress', stage: 'pour_end', proof: true)), [TaskAction.complete]);
+      expect(actionLabel(load('accepted', stage: 'loaded'), TaskAction.start), 'انطلقت إلى الموقع');
+      expect(actionLabel(task('accepted', stage: 'picked_up'), TaskAction.start), 'بدء التوصيل');
+    });
+    test('load details and site', () {
+      final t = load('accepted');
+      expect(t.ticketNo, 'RM-1-1');
+      expect(t.volumeM3, 9.0);
+      expect(t.siteReady, isFalse);
+      expect(t.siteContact, 'م. خالد');
+      expect(t.address, 'برج الريم، الشرق');
+      expect(t.target, (lat: 29.37, lng: 47.99));
+    });
+    test('ticket quantities', () {
+      expect(parseM3('8.5'), 8.5);
+      expect(parseM3('٨٫٥'), 8.5);
+      expect(parseM3('8,25'), 8.25);
+      expect(parseM3('8.555'), isNull);
+      expect(parseM3('abc'), isNull);
+      expect(ticketError(9, 8.5, 0.5, 'م. خالد'), isNull);
+      expect(ticketError(9, 8.5, 1, 'م. خالد'), isNotNull);
+      expect(ticketError(9, null, 0, 'x'), isNotNull);
+      expect(ticketError(9, 9, 0, ' '), isNotNull);
+    });
+  });
 }

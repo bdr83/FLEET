@@ -202,6 +202,9 @@ export class TasksController {
         if (pod && !pod.verified) throw new ConflictException('approve the proof of delivery first');
         if (!pod && (await needsProof(c, t))) throw new ConflictException('proof of delivery missing');
       }
+      if (action === 'review' && (await c.query('SELECT 1 FROM ops.load_ticket WHERE task_id = $1 AND signed_at IS NULL', [id])).rowCount) {
+        throw new ConflictException('the delivery ticket is not signed');
+      }
       if (o.endAssignment) await c.query('UPDATE ops.assignment SET active = false, ended_at = now() WHERE task_id = $1 AND active', [id]);
       return this.transition(c, a, id, t.status, action, note);
     });

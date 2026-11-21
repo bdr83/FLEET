@@ -6,7 +6,23 @@ import { audit } from '../common/audit';
 import { v } from '../common/validate';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
-import { FAIL_REASONS, isDelivery, needsProof, PIN_MAX_ATTEMPTS, Stage, STAGE_ALLOWED, STAGES } from '../sectors/delivery/delivery';
+import { FAIL_REASONS, isDelivery, needsProof, PIN_MAX_ATTEMPTS, STAGE_ALLOWED, STAGES } from '../sectors/delivery/delivery';
+import * as concrete from '../sectors/concrete/concrete';
+
+/** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS])];
+function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
+  if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
+  if (concrete.isConcrete(pack)) {
+    const c = code as concrete.Stage;
+    return (concrete.STAGES as readonly string[]).includes(code) ? { allowed: concrete.STAGE_ALLOWED[c], needs: concrete.STAGE_NEEDS[c] } : null;
+  }
+  return null;
+}
+function reasonsOf(pack: string): readonly string[] | null {
+  return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : null;
+}
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
 export const MAX_AGE_MS = 7 * 86_400_000;
@@ -239,7 +255,11 @@ export class DriverController {
           `SELECT t.id, t.ref, t.status, t.sector_pack, lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
                   t.attributes, t.version, asg.asset_id,
                   (SELECT m.code FROM ops.task_milestone m WHERE m.task_id = t.id ORDER BY m.occurred_at DESC LIMIT 1) AS stage,
-                  EXISTS (SELECT 1 FROM ops.delivery_pod p WHERE p.task_id = t.id) AS has_proof
+                  (EXISTS (SELECT 1 FROM ops.delivery_pod p WHERE p.task_id = t.id)
+                   OR EXISTS (SELECT 1 FROM ops.load_ticket l WHERE l.task_id = t.id AND l.signed_at IS NOT NULL)) AS has_proof,
+                  (SELECT jsonb_build_object('ticket_no', l.ticket_no, 'volume_m3', l.volume_m3, 'batched_at', l.batched_at, 'signed', l.signed_at IS NOT NULL,
+                          'planned_arrival', l.planned_arrival, 'site_ready', p.site_ready, 'mix_code', p.mix_code)
+                     FROM ops.load_ticket l JOIN ops.pour_order p ON p.id = l.pour_order_id WHERE l.task_id = t.id) AS ticket
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE t.status IN ('assigned','accepted','in_progress')
                OR ($2 AND t.status = 'failed' AND t.sector_pack = 'delivery@1'
@@ -252,7 +272,8 @@ export class DriverController {
   /**
    * Offline sync: the app queues actions with a client_op_id and sends them in order when online.
    * Each op is applied once; a re-sent op returns "duplicate". One bad op does not block the rest.
-   * Op types: task_status (core), milestone (a stage inside the task, e.g. picked_up) and pod (proof of delivery).
+   * Op types: task_status (core), milestone (a stage inside the task, e.g. picked_up), pod (proof of delivery)
+   * and ticket (the signed concrete delivery ticket).
    */
   @Post('sync')
   @HttpCode(200)
@@ -262,7 +283,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -271,11 +292,17 @@ export class DriverController {
         note: v.str(o.note, `ops[${i}].note`, { max: 500 }),
       };
       if (type === 'task_status') {
-        return { ...base, type: 'task_status' as const, to_status: v.str(o.to_status, `ops[${i}].to_status`, { required: true, max: 20 })!, reason_code: v.oneOf(o.reason_code, `ops[${i}].reason_code`, FAIL_REASONS) };
+        return { ...base, type: 'task_status' as const, to_status: v.str(o.to_status, `ops[${i}].to_status`, { required: true, max: 20 })!, reason_code: v.oneOf(o.reason_code, `ops[${i}].reason_code`, ALL_REASONS) };
       }
       if (type === 'milestone') {
-        return { ...base, type: 'milestone' as const, code: v.oneOf(o.code, `ops[${i}].code`, STAGES, { required: true })!,
+        return { ...base, type: 'milestone' as const, code: v.oneOf(o.code, `ops[${i}].code`, ALL_STAGES, { required: true })!,
           lat: num(o.lat, `ops[${i}].lat`, -90, 90), lng: num(o.lng, `ops[${i}].lng`, -180, 180) };
+      }
+      if (type === 'ticket') {
+        const poured = concrete.m3(o.poured_m3, `ops[${i}].poured_m3`, { required: true, max: 20, zero: true })!;
+        const returned = concrete.m3(o.returned_m3, `ops[${i}].returned_m3`, { max: 20, zero: true }) ?? 0;
+        return { ...base, type: 'ticket' as const, poured_m3: poured, returned_m3: returned,
+          signed_by: v.str(o.signed_by, `ops[${i}].signed_by`, { required: true, max: 120 })!, file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }) };
       }
       const method = v.oneOf(o.method, `ops[${i}].method`, ['pin', 'photo', 'signature'] as const, { required: true })!;
       const pin = method === 'pin' ? v.str(o.pin, `ops[${i}].pin`, { required: true, max: 4 }) : null;
@@ -300,13 +327,54 @@ export class DriverController {
         const delivery = isDelivery(t.sector_pack);
 
         if (op.type === 'milestone') {
-          if (!delivery) { reject('not_supported'); continue; }
-          if (!STAGE_ALLOWED[op.code].includes(t.status)) { reject('invalid_stage', t.status); continue; }
+          const rule = stageRule(t.sector_pack, op.code);
+          if (!rule) { reject('not_supported'); continue; }
+          if (!rule.allowed.includes(t.status)) { reject('invalid_stage', t.status); continue; }
+          if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
+            reject('stage_out_of_order', t.status); continue;
+          }
+          if (concrete.isConcrete(t.sector_pack) && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
+            reject('stage_already_recorded', t.status); continue;
+          }
+          if (concrete.isConcrete(t.sector_pack) && op.code === 'loaded') {
+            // batching starts the concrete age clock on the ticket
+            await c.query('UPDATE ops.load_ticket SET batched_at = $2 WHERE task_id = $1 AND batched_at IS NULL', [op.task_id, op.occurred_at]);
+          }
           if (await this.insertOnce(c, `INSERT INTO ops.task_milestone (id, tenant_id, task_id, code, occurred_at, actor_id, client_op_id, lat, lng, note)
               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
             [randomUUID(), a.tenantId, op.task_id, op.code, op.occurred_at, a.userId, op.client_op_id, op.lat, op.lng, op.note])) {
             results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
+          continue;
+        }
+
+        if (op.type === 'ticket') {
+          if (!concrete.isConcrete(t.sector_pack)) { reject('not_supported'); continue; }
+          if (t.status !== 'in_progress') { reject('invalid_transition', t.status); continue; }
+          const lt = (await c.query('SELECT volume_m3::float, signed_at, pour_order_id FROM ops.load_ticket WHERE task_id = $1 FOR UPDATE', [op.task_id])).rows[0];
+          if (!lt) { reject('not_supported', t.status); continue; }
+          if (lt.signed_at) { reject('already_signed', t.status); continue; }
+          if (op.poured_m3 + op.returned_m3 > lt.volume_m3 + 0.05) { reject('quantity_exceeds_load', t.status); continue; }
+          const ms = (await c.query(
+            `SELECT min(occurred_at) FILTER (WHERE code = 'at_site') AS at_site, min(occurred_at) FILTER (WHERE code = 'pour_start') AS pour_start,
+                    bool_or(code = 'pour_end') AS ended FROM ops.task_milestone WHERE task_id = $1`, [op.task_id])).rows[0];
+          if (!ms.ended) { reject('stage_out_of_order', t.status); continue; }
+          const s = await concrete.settingsOf(c, t.legal_entity_id);
+          const wait = concrete.waiting(ms.at_site, ms.pour_start, s.free_wait_minutes);
+          await c.query('SAVEPOINT op');
+          try {
+            await c.query(
+              `UPDATE ops.load_ticket SET poured_m3 = $2, returned_m3 = $3, signed_by = $4, file_key = $5, signed_at = $6, wait_minutes = $7, sign_client_op_id = $8 WHERE task_id = $1`,
+              [op.task_id, op.poured_m3, op.returned_m3, op.signed_by, op.file_key, op.occurred_at, wait.wait_minutes, op.client_op_id]);
+          } catch (e) {
+            await c.query('ROLLBACK TO SAVEPOINT op');
+            if ((e as { code?: string }).code === '23505') { results.push({ client_op_id: op.client_op_id, result: 'duplicate' }); continue; }
+            throw e;
+          }
+          // what the invoice prices: poured m³ and the waiting hours charged after the free time
+          const quantities = { m3: op.poured_m3, ...(wait.billable_hours > 0 ? { hour: wait.billable_hours } : {}) };
+          await c.query(`UPDATE ops.task SET attributes = attributes || jsonb_build_object('quantities', $2::jsonb), version = version + 1 WHERE id = $1`, [op.task_id, JSON.stringify(quantities)]);
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           continue;
         }
 
@@ -337,8 +405,14 @@ export class DriverController {
         }
 
         if (!(DRIVER_FLOW[t.status] ?? []).includes(op.to_status)) { reject('invalid_transition', t.status); continue; }
-        const reasonCode = delivery ? op.reason_code : null;
+        const reasons = reasonsOf(t.sector_pack);
+        if (op.reason_code && op.to_status === 'failed' && reasons && !reasons.includes(op.reason_code)) { reject('invalid_reason', t.status); continue; }
+        const reasonCode = reasons ? op.reason_code : null;
         if (op.to_status === 'failed' && !op.note && !reasonCode) { reject('reason_required', t.status); continue; }
+        if (op.to_status === 'completed' && concrete.isConcrete(t.sector_pack)
+          && (await c.query('SELECT 1 FROM ops.load_ticket WHERE task_id = $1 AND signed_at IS NULL', [op.task_id])).rowCount) {
+          reject('proof_required', t.status); continue;
+        }
         if (op.to_status === 'completed' && delivery && (await needsProof(c, t))
           && !(await c.query('SELECT 1 FROM ops.delivery_pod WHERE task_id = $1', [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue;
@@ -348,6 +422,13 @@ export class DriverController {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [randomUUID(), a.tenantId, op.task_id, t.status, op.to_status, op.occurred_at, a.userId, op.client_op_id, op.note, op.to_status === 'failed' ? reasonCode : null])) {
           await c.query('UPDATE ops.task SET status = $2, version = version + 1 WHERE id = $1', [op.task_id, op.to_status]);
+          if (concrete.isConcrete(t.sector_pack) && (op.to_status === 'completed' || op.to_status === 'failed')) {
+            // the mixer is free once it is back at the plant: shorten its booking so it can take the next load
+            const back = (await concrete.settingsOf(c, t.legal_entity_id)).lead_minutes;
+            await c.query(
+              `UPDATE ops.assignment SET period = tstzrange(LEAST(lower(period), $2::timestamptz), $2::timestamptz + make_interval(mins => $3))
+                WHERE task_id = $1 AND active AND upper(period) > $2::timestamptz + make_interval(mins => $3)`, [op.task_id, op.occurred_at, back]);
+          }
           results.push({ client_op_id: op.client_op_id, result: 'applied', status: op.to_status });
         } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
       }
@@ -371,12 +452,14 @@ export class DriverController {
 
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
-  | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: Stage; lat: number | null; lng: number | null }
+  | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null }
+  | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
-  return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE client_op_id = $1`, [op.client_op_id])).rowCount;
+  const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
+  return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;
 }
 async function dupStatus(c: PoolClient, op: SyncOp) {
   if (op.type !== 'task_status') return {};
