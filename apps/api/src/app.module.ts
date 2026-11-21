@@ -19,10 +19,12 @@ import { ReportsController } from './reports/reports.controller';
 import { CustomersController } from './crm/customers.controller';
 import { ContractsController } from './crm/contracts.controller';
 import { PortalController } from './crm/portal.controller';
+import { MaintenanceController } from './maint/maintenance.controller';
+import { ExpensesController } from './maint/expenses.controller';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, TasksController],
   providers: [
     DbService,
     OtpService,

@@ -138,3 +138,25 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 - عقد فعّال واحد للعميل في أي يوم. أسعار العقد الفعّال وشروط دفعه مجمّدة؛ لتغييرها يُنهى العقد ويُفعَّل عقد جديد، فتبقى كل فاتورة مرتبطة بالأسعار المتفق عليها وقتها.
 - المهمة المرتبطة بعميل تأخذ عقده الفعّال في تاريخ تنفيذها (بتوقيت شركته القانونية).
 - مستخدم بوابة العميل عضوية بدور customer مرتبطة بعميل واحد (`customer_id` عند إضافة العضو).
+
+## الصيانة والمصروفات (P7)
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET/POST | `/maintenance/plans` | fleet:read / fleet:write | خطة دورية `{asset_id, name, interval_km?, interval_days?}` تبدأ من العدّاد الحالي واليوم |
+| PATCH | `/maintenance/plans/:id` | fleet:write | |
+| GET | `/maintenance/due?within_km=500&within_days=14` | fleet:read | المستحق قريبًا والمتأخر (`state`: due_soon أو overdue) |
+| GET/POST | `/work-orders` | fleet:read / fleet:write | أمر عمل `{asset_id, kind, plan_id?, out_of_service?, vendor?, description?}` برقم تسلسلي لكل شركة وسنة |
+| GET | `/work-orders/:id` | fleet:read | مع بنود التكلفة |
+| POST | `/work-orders/:id/lines` | fleet:write | `{kind: part\|labor\|other, description, qty?, unit_cost}` |
+| POST | `/work-orders/:id/start\|complete\|cancel` | fleet:write | الإكمال يحدّث العدّاد وعدّاد الخطة، ويعيد المركبة للخدمة، ويقيّد التكلفة مصروفًا معتمدًا |
+| GET | `/expenses?status=&category=&asset_id=&worker_id=&from=&to=` | fleet:read | مع الإجمالي لكل عملة |
+| POST | `/expenses` | fleet:write | مصروف من المكتب، معتمد مباشرة. الشركة القانونية تتبع المركبة أو العامل |
+| POST | `/expenses/:id/approve`, `/expenses/:id/reject` | fleet:write | الرفض يتطلب سببًا، ولا يعتمد أحد مطالبته |
+| POST | `/driver/expenses` | shift:own | مطالبة السائق (وقود، مواقف، رسوم طرق، غسيل) `{client_op_id, category, amount, liters?, odometer_km?}` تُربط بمناوبته ومركبته |
+| GET | `/driver/expenses` | shift:own | مطالباتي |
+| GET | `/reports/costs?from=&to=&group=asset\|category&format=csv` | reports:read | التكلفة لكل مركبة مع تكلفة الكيلومتر واستهلاك الوقود، أو لكل فئة |
+
+قواعد:
+- أمر العمل بـ `out_of_service` يوقف المركبة فلا تُستخدم في مناوبة ولا تُسند لمهمة، وتعود للخدمة عند إغلاق آخر أمر يوقفها.
+- العدّاد لا يرجع للخلف في أي مسار.

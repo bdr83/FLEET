@@ -37,6 +37,26 @@ export const v = {
     if (typeof val !== 'object' || Array.isArray(val) || JSON.stringify(val).length > 4000) throw new BadRequestException(`${field} must be an object`);
     return val as Record<string, unknown>;
   },
+  /** An amount as a string with up to 3 decimals (fils). Numbers are accepted and converted. */
+  money(val: unknown, field: string, { required = false, positive = false } = {}): string | null {
+    if (val === undefined || val === null) {
+      if (required) throw new BadRequestException(`${field} required`);
+      return null;
+    }
+    const s = typeof val === 'number' ? String(val) : val;
+    if (typeof s !== 'string' || !/^\d{1,15}(\.\d{1,3})?$/.test(s)) throw new BadRequestException(`${field} must be an amount with up to 3 decimals`);
+    if (positive && Number(s) <= 0) throw new BadRequestException(`${field} must be more than 0`);
+    return s;
+  },
+  ts(val: unknown, field: string, { required = false } = {}): Date | null {
+    if (val === undefined || val === null) {
+      if (required) throw new BadRequestException(`${field} required`);
+      return null;
+    }
+    const d = typeof val === 'string' ? new Date(val) : null;
+    if (!d || Number.isNaN(d.getTime())) throw new BadRequestException(`${field} must be an ISO timestamp`);
+    return d;
+  },
   date(val: unknown, field: string): string | null {
     if (val === undefined || val === null) return null;
     if (typeof val !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(val) || Number.isNaN(Date.parse(val))) throw new BadRequestException(`${field} must be YYYY-MM-DD`);
