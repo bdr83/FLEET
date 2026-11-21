@@ -1,18 +1,19 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { AuthGuard, AuthContext } from '../auth/auth.guard';
+import { AuthGuard, AuthContext, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 import { DbService } from '../db/db.service';
 
 const COLUMNS = 'id, legal_entity_id, branch_id, sector_pack, status, service_window, version, attributes';
 
-/** Minimal task endpoints for P0: they exist to prove tenant isolation end to end. */
+/** Minimal task endpoints (full dispatch arrives in P4). */
 @Controller('v1/tasks')
 @UseGuards(AuthGuard)
 export class TasksController {
   constructor(private readonly db: DbService) {}
 
   @Get()
+  @Perm('tasks:read')
   async list(@Auth() auth: AuthContext) {
     return this.db.withTenant(auth, async (c) => {
       const r = await c.query(`SELECT ${COLUMNS} FROM ops.task ORDER BY id LIMIT 200`);
@@ -21,6 +22,7 @@ export class TasksController {
   }
 
   @Get(':id')
+  @Perm('tasks:read')
   async get(@Auth() auth: AuthContext, @Param('id', new ParseUUIDPipe()) id: string) {
     const row = await this.db.withTenant(auth, async (c) => {
       const r = await c.query(`SELECT ${COLUMNS} FROM ops.task WHERE id = $1`, [id]);
@@ -32,6 +34,7 @@ export class TasksController {
   }
 
   @Post()
+  @Perm('tasks:write')
   async create(@Auth() auth: AuthContext, @Body() body: { legal_entity_id?: string; sector_pack?: string }) {
     if (typeof body?.legal_entity_id !== 'string' || typeof body?.sector_pack !== 'string') {
       throw new BadRequestException('legal_entity_id and sector_pack are required');
