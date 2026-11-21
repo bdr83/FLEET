@@ -152,3 +152,4 @@ fieldset.addr legend { padding: 0 6px; color: var(--muted); font-size: 13px; }
 .pin-box { background: var(--primary-soft); border-radius: var(--radius); padding: 12px; text-align: center; }
 .pin-box .pin { font-size: 32px; color: var(--primary); margin-top: 4px; }
 .track-map { height: 220px; border-radius: var(--radius); overflow: hidden; }
+.pod-photo { max-width: 100%; max-height: 240px; border-radius: var(--radius); border: 1px solid var(--border); display: block; }

@@ -25,10 +25,13 @@ import { InvoicesController } from './billing/invoices.controller';
 import { PaymentsController } from './billing/payments.controller';
 import { DeliveryController } from './sectors/delivery/delivery.controller';
 import { TrackController } from './sectors/delivery/track.controller';
+import { FilesController, MAX_FILE_BYTES } from './files/files.controller';
+import { raw } from 'express';
+import { MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, TrackController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, TrackController, FilesController, TasksController],
   providers: [
     DbService,
     OtpService,
@@ -38,4 +41,9 @@ import { MaintenanceService } from './maintenance/maintenance.service';
     { provide: SMS_SENDER, useClass: LogSmsSender },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /** Raw image bodies for the driver's file upload only; every other route keeps the JSON parser. */
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_FILE_BYTES })).forRoutes({ path: 'v1/driver/files', method: RequestMethod.POST });
+  }
+}

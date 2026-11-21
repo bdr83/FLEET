@@ -73,7 +73,11 @@ export function DeliveryPanel({ taskId, status, onChange }: { taskId: string; st
               <span className="muted num">{dt(d.pod.created_at)}</span>
             </div>
             {d.pod.recipient_name && <div>استلمه: {d.pod.recipient_name}</div>}
-            {d.pod.file_key && <div className="muted">الملف: <span className="num">{d.pod.file_key}</span></div>}
+            {d.pod.file_key?.startsWith('file:') ? (
+              <a href={`/api/v1/files/${d.pod.file_key.slice(5)}`} target="_blank" rel="noreferrer">
+                <img src={`/api/v1/files/${d.pod.file_key.slice(5)}`} alt="صورة إثبات التسليم" className="pod-photo" />
+              </a>
+            ) : d.pod.file_key && <div className="muted">الملف: <span className="num">{d.pod.file_key}</span></div>}
             {!d.pod.verified && writer && (
               <div className="row">
                 <button className="primary" disabled={act.busy} onClick={() => pod('approve')}>قبول الإثبات</button>

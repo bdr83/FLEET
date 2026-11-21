@@ -75,6 +75,23 @@ export class DriverController {
     });
   }
 
+  /** Vehicles the driver may pick when starting a shift: same company, in service, not in another open shift. */
+  @Get('assets')
+  @Perm('shift:own')
+  assets(@Auth() a: AuthContext) {
+    return this.db.withTenant(a, async (c) => {
+      const w = await this.me(c, a, { active: false });
+      return {
+        data: (await c.query(
+          `SELECT a.id, a.plate_no, a.asset_type, a.make, a.model, a.odometer_km FROM fleet.asset a
+            WHERE a.legal_entity_id = $1 AND a.status IN ('available','in_use')
+              AND NOT EXISTS (SELECT 1 FROM shift.shift s WHERE s.asset_id = a.id AND s.ended_at IS NULL AND s.worker_id <> $2)
+              AND ($3::uuid IS NULL OR a.branch_id IS NULL OR a.branch_id = $3)
+            ORDER BY a.plate_no NULLS LAST LIMIT 200`, [w.legal_entity_id, w.id, w.branch_id])).rows,
+      };
+    });
+  }
+
   /** Start a shift. Idempotent on client_op_id so an offline retry never opens a second shift. */
   @Post('shifts')
   @Perm('shift:own')

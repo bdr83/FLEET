@@ -182,6 +182,32 @@ import { auth, createApp, hasDb, joinAs, newPhone, onboard } from './helpers';
     });
   });
 
+  describe('files and vehicles for the driver app', () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)]);
+    it('uploads a proof photo once per client_op_id and the office can view it', async () => {
+      const op = randomUUID();
+      const up = (body: Buffer, type = 'image/jpeg', id = op) => request(http).post(`/v1/driver/files?purpose=pod&client_op_id=${id}`).set(auth(driver.token)).set('Content-Type', type).send(body);
+      const r = await up(jpeg).expect(201);
+      expect(r.body.file_key).toMatch(/^file:[0-9a-f-]{36}$/);
+      expect((await up(jpeg).expect(201)).body).toMatchObject({ file_key: r.body.file_key, duplicate: true });
+      await up(Buffer.from('not an image'), 'image/jpeg', randomUUID()).expect(400);
+      await up(jpeg, 'image/png', randomUUID()).expect(400);
+      await up(Buffer.alloc(2 * 1024 * 1024 + 10, 1), 'image/jpeg', randomUUID()).expect(413);
+      const id = r.body.file_key.slice(5);
+      const view = await get(`/v1/files/${id}`).expect(200);
+      expect(view.headers['content-type']).toBe('image/jpeg');
+      expect(Buffer.from(view.body).length).toBe(jpeg.length);
+      await get(`/v1/files/${id}`, B.access_token).expect(404);
+      await get(`/v1/files/${id}`, driver.token).expect(403);
+    });
+    it('lists vehicles of the driver company only', async () => {
+      const mine = (await post('/v1/assets', { legal_entity_id: A.legal_entity_id, asset_type: 'motorbike', plate_no: `M-${Date.now() % 100000}` }).expect(201)).body;
+      await request(http).post('/v1/assets').set(auth(B.access_token)).send({ legal_entity_id: B.legal_entity_id, asset_type: 'van', plate_no: `B-${Date.now() % 100000}` }).expect(201);
+      const list = (await get('/v1/driver/assets', driver.token).expect(200)).body.data;
+      expect(list.map((x: { id: string }) => x.id)).toEqual([mine.id]);
+    });
+  });
+
   describe('import and auto-assign', () => {
     it('imports orders, skipping duplicates and reporting bad rows', async () => {
       const r = await post('/v1/delivery/import', { legal_entity_id: A.legal_entity_id, orders: [
