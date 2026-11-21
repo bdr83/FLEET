@@ -136,3 +136,4 @@ dd.num, td.num, div.num { text-align: right; } /* LTR numbers still align to the
 }
 .only-print { display: none; }
 @media print { .only-print { display: block; } }
+.side.open { box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); }

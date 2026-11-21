@@ -271,7 +271,56 @@ try {
   ok(`ميزان المراجعة متوازن (${totals[0]})`);
   await shot(page, '08-trial-balance');
 
-  // 6. Logout clears the session
+  // Reports: tasks by day, CSV export
+  await page.click('nav a:has-text("التقارير")');
+  await page.locator('tbody tr').first().waitFor();
+  const csv = await page.evaluate(async (href) => { const r = await fetch(href); return { status: r.status, type: r.headers.get('content-type'), disp: r.headers.get('content-disposition'), body: await r.text() }; },
+    await page.locator('a:has-text("تنزيل CSV")').getAttribute('href'));
+  if (csv.status !== 200 || !csv.type?.includes('text/csv') || !csv.disp?.includes('attachment') || !csv.body.includes('completed')) throw new Error(`csv export failed: ${JSON.stringify(csv).slice(0, 200)}`);
+  await page.click('button[role=tab]:has-text("تكاليف التشغيل")');
+  await page.locator('td:has-text("12-34567")').waitFor();
+  ok('التقارير: المهام حسب اليوم وتصدير CSV وتكاليف المركبة');
+  await shot(page, '09-reports');
+
+  // Settings: invoice prefix, and a customer-portal user for the merchant
+  await page.click('nav a:has-text("الإعدادات")');
+  await page.fill('input[name=invoice_prefix]', 'WRD');
+  await page.click('button:has-text("حفظ")');
+  await page.locator('text=تم الحفظ').waitFor();
+  await page.click('button[role=tab]:has-text("المستخدمون")');
+  await page.click('button:has-text("إضافة مستخدم")');
+  const portalPhone = `+9659${String(Date.now()).slice(-7)}`;
+  await page.fill('.modal input[name=phone]', portalPhone);
+  await page.fill('.modal input[name=display_name]', 'موظف متجر الورد');
+  await page.selectOption('.modal select[name=role_code]', 'customer');
+  await page.locator('.modal select[name=customer_id] option:has-text("متجر الورد")').waitFor({ state: 'attached' });
+  await page.selectOption('.modal select[name=customer_id]', { label: 'متجر الورد' });
+  await page.click('.modal button:has-text("إضافة")');
+  await page.locator('td:has-text("موظف متجر الورد")').waitFor();
+  ok('الإعدادات: بادئة الفواتير ومستخدم لبوابة العملاء');
+  await shot(page, '10-settings');
+
+  // The merchant logs in: only the portal, their own task, and a new request
+  await page.click('button:has-text("خروج")');
+  await page.waitForURL(/\/login/);
+  await page.fill('input[name=phone]', portalPhone);
+  await page.click('button:has-text("إرسال رمز التحقق")');
+  await page.fill('input[name=code]', (await page.locator('.alert.ok .num').textContent()).trim());
+  await page.click('button:has-text("دخول")');
+  await page.waitForURL(/\/portal$/);
+  await page.locator('td:has-text("WEB-001")').waitFor();
+  if (await page.locator('nav a:has-text("الفواتير")').count()) throw new Error('portal user sees staff navigation');
+  const staffApi = await page.evaluate(async () => (await fetch('/api/v1/tasks')).status);
+  if (staffApi !== 403) throw new Error(`portal user reached staff API: ${staffApi}`);
+  await page.click('button:has-text("طلب جديد")');
+  await page.fill('.modal input[name=ref]', 'WRD-77');
+  await page.fill('.modal input[name=address]', 'حولي، شارع تونس');
+  await page.click('.modal button:has-text("إرسال الطلب")');
+  await page.locator('td:has-text("WRD-77")').waitFor();
+  ok('بوابة العميل: يرى مهامه فقط، ولا يصل لواجهات الموظفين، ويرسل طلبًا جديدًا');
+  await shot(page, '11-portal');
+
+  // Logout clears the session
   await page.click('button:has-text("خروج")');
   await page.waitForURL(/\/login/);
   const after = await page.evaluate(async () => (await fetch('/api/v1/me')).status);

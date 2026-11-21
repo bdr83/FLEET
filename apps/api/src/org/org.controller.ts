@@ -22,7 +22,7 @@ export class OrgController {
   listEntities(@Auth() a: AuthContext) {
     return this.db.withTenant(a, async (c) => ({
       data: (await c.query(
-        `SELECT id, name, country, currency, timezone, cr_number FROM org.legal_entity
+        `SELECT id, name, country, currency, timezone, cr_number, tax_rate::float, tax_number, invoice_prefix FROM org.legal_entity
           WHERE cardinality($1::uuid[]) = 0 OR id = ANY($1::uuid[]) ORDER BY name`, [a.entityIds])).rows,
     }));
   }

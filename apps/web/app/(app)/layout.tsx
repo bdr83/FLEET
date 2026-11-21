@@ -1,8 +1,8 @@
 'use client';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { api, session } from '@/lib/api';
+import { api, ApiError, session } from '@/lib/api';
 import { can, Me, MeContext } from '@/components/me';
 import { ROLE } from '@/lib/format';
 
@@ -27,16 +27,35 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string }[] = [
   { href: '/settings', label: 'الإعدادات', perm: 'org:read' },
 ];
 
+const PORTAL_ME: Me = {
+  user_id: '', phone: null, display_name: null, tenant_id: '', tenant_name: null, tenant_status: null, role: 'customer',
+  permissions: ['portal:own'], scope: { legal_entity_ids: [], branch_ids: [] }, legal_entities: [],
+};
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const path = usePathname();
-  useEffect(() => { api<Me>('/me').then(setMe).catch((e) => setFailed(e.message)); }, []);
+  const router = useRouter();
+  useEffect(() => {
+    api<Me>('/me').then(setMe).catch(async (e) => {
+      // /me is for staff. A customer-portal account has only the portal; a driver uses the mobile app.
+      if (e instanceof ApiError && e.status === 403) {
+        const p = await api<{ name: string }>('/portal/me').catch(() => null);
+        if (p) return setMe({ ...PORTAL_ME, display_name: p.name });
+        return setFailed('هذا الحساب مخصص لتطبيق السائق على الجوال.');
+      }
+      setFailed(e.message);
+    });
+  }, []);
   useEffect(() => setOpen(false), [path]);
+  // Customer-portal users only have the portal
+  const portalOnly = me?.role === 'customer';
+  useEffect(() => { if (portalOnly && !path.startsWith('/portal')) router.replace('/portal'); }, [portalOnly, path, router]);
 
   if (failed) return <div className="login"><div className="card"><p>{failed}</p><Link href="/login">تسجيل الدخول</Link></div></div>;
-  if (!me) return <div className="login muted">جارٍ التحميل…</div>;
+  if (!me || (portalOnly && !path.startsWith('/portal'))) return <div className="login muted">جارٍ التحميل…</div>;
 
   const isOn = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
   return (
@@ -45,7 +64,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className={`side ${open ? 'open' : ''}`} aria-label="القائمة">
           <div className="brand">إدارة الأساطيل</div>
           <nav className="nav">
-            {NAV.map((n, i) => n.sec
+            {portalOnly ? <Link href="/portal" className="on">طلباتي</Link> : NAV.map((n, i) => n.sec
               ? <div className="sec" key={i}>{n.sec}</div>
               : (!n.perm || can(me, n.perm)) && <Link key={n.href} href={n.href!} className={isOn(n.href!) ? 'on' : ''}>{n.label}</Link>)}
           </nav>
@@ -62,7 +81,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <button className="small" onClick={async () => { await session('logout'); location.href = '/login'; }}>خروج</button>
             </div>
           </header>
-          <main className="page">{children}</main>
+          <main>{children}</main>
         </div>
       </div>
     </MeContext.Provider>
