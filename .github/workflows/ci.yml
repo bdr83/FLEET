@@ -1,0 +1,46 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  db-and-api:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: fleet
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U admin" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_DATABASE_URL: postgresql://admin:admin@localhost:5432/fleet
+      APP_DATABASE_URL: postgresql://app_rw:ci-app-pass@localhost:5432/fleet
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Bootstrap roles and extensions
+        run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -v app_rw_password="'ci-app-pass'" -f db/bootstrap.sql
+      - name: Migrate (twice, must be idempotent)
+        run: DATABASE_URL="$ADMIN_DATABASE_URL" ./db/migrate.sh && DATABASE_URL="$ADMIN_DATABASE_URL" ./db/migrate.sh
+      - name: Isolation, constraint and ledger tests
+        run: ./db/tests/run.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - name: API typecheck, unit and e2e tests
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ env.APP_DATABASE_URL }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
