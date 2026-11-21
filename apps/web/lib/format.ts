@@ -107,3 +107,11 @@ export const EXPENSE_CAT: Record<string, string> = {
 export const EXPENSE_STATUS: Record<string, { label: string; tone: string }> = {
   submitted: tone('بانتظار الاعتماد', 'warning'), approved: tone('معتمد', 'success'), rejected: tone('مرفوض', 'danger'),
 };
+
+export const INVOICE_STATUS: Record<string, { label: string; tone: string }> = {
+  draft: tone('مسودة'), issued: tone('صادرة', 'info'), partially_paid: tone('مدفوعة جزئيًا', 'warning'), paid: tone('مدفوعة', 'success'), void: tone('ملغاة', 'danger'),
+};
+export const PAY_METHOD: Record<string, string> = {
+  cash: 'نقدًا', bank_transfer: 'تحويل بنكي', knet: 'كي نت', card: 'بطاقة', cheque: 'شيك', cod_offset: 'خصم من مبالغ التحصيل', other: 'أخرى',
+};
+export const SKIP_REASON = (r: string) => r === 'no_contract' ? 'بلا عقد' : r === 'invalid_quantities' ? 'كميات غير صالحة' : r.startsWith('unpriced') ? 'وحدة بلا سعر في العقد' : r;

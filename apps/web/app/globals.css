@@ -126,3 +126,13 @@ dd.num, td.num, div.num { text-align: right; } /* LTR numbers still align to the
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; color: var(--muted); }
 .tabs button.on { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+@media print {
+  .side, .top, .no-print { display: none !important; }
+  .shell { display: block; }
+  .page { padding: 0; max-width: none; }
+  .card, .tbl-wrap { border: 0; box-shadow: none; }
+  body { background: #fff; }
+}
+.only-print { display: none; }
+@media print { .only-print { display: block; } }

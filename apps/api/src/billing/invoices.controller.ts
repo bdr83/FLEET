@@ -14,6 +14,8 @@ const COLS = `i.id, i.legal_entity_id, i.customer_id, cu.name AS customer_name, 
   i.subtotal::text, i.tax_rate::float, i.tax_amount::text, i.total::text, i.paid_amount::text, (i.total - i.paid_amount)::text AS balance,
   i.notes, i.void_reason, i.created_at`;
 const FROM = `billing.invoice i JOIN crm.customer cu ON cu.id = i.customer_id`;
+/** Arabic names of the work types for invoice lines; unknown packs fall back to their code. */
+const PACK_NAMES: Record<string, string> = { delivery: 'توصيل', concrete: 'خرسانة جاهزة', staffing: 'توريد سائقين', internal: 'أسطول داخلي' };
 const UNIT_NAMES: Record<string, string> = { task: 'مهمة', km: 'كم', hour: 'ساعة', trip: 'رحلة', m3: 'م³', ton: 'طن', day: 'يوم', month: 'شهر' };
 
 /** Quantities a task carries for pricing, e.g. attributes.quantities = { km: 12.5, m3: 8 }. Defaults to one task. */
@@ -114,7 +116,7 @@ export class InvoicesController {
         if (quote.unpriced.length || !quote.lines.length) { skipped.push({ task_id: t.id, reason: `unpriced:${quote.unpriced.join(',') || 'task'}` }); continue; }
         for (const l of quote.lines) {
           lines.push({ task_id: t.id, rate_id: l.rate_id, unit: l.unit, qty: l.qty, unit_price: l.unit_price, amount: l.amount,
-            description: `${l.description ?? t.sector_pack.split('@')[0]}${t.ref ? ` (${t.ref})` : ''} · ${UNIT_NAMES[l.unit]}` });
+            description: `${l.description ?? PACK_NAMES[t.sector_pack.split('@')[0]] ?? t.sector_pack.split('@')[0]}${t.ref ? ` (${t.ref})` : ''} · ${UNIT_NAMES[l.unit]}` });
         }
       }
       const id = randomUUID();

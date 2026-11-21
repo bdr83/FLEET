@@ -166,7 +166,7 @@ try {
   await claim.locator('.badge:has-text("معتمد")').waitFor();
   ok('مصروف الصيانة مسجّل، ومطالبة السائق تُعتمد من المكتب');
 
-  // Create a task from the form
+  // Tasks: create from the form for the customer, assign from the dispatch board
   await page.click('nav a:has-text("المهام")');
   await page.locator('h1:has-text("المهام")').waitFor();
   await page.click('button:has-text("مهمة جديدة")');
@@ -174,36 +174,102 @@ try {
   await page.fill('input[name=address]', 'السالمية، قطعة 5، شارع 10');
   await page.fill('input[name=recipient_name]', 'أحمد');
   await page.selectOption('select[name=customer_id]', { label: 'متجر الورد' });
-  await shot(page, '02-new-task');
+  await shot(page, '03-new-task');
   await page.click('.modal button:has-text("إنشاء")');
   await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
   await page.locator('.badge:has-text("جاهزة")').waitFor();
+  const taskId = page.url().split('/').pop();
   ok('إنشاء مهمة من النموذج وفتح صفحتها');
 
-  // 4. It shows on the dispatch board queue; assign it from there
   await page.click('nav a:has-text("لوحة التوزيع")');
   await page.locator('td a:has-text("WEB-001")').waitFor();
   await page.locator('tr', { has: page.locator('a:has-text("WEB-001")') }).locator('button:has-text("إسناد")').click();
-  await page.selectOption('select[name=worker]', w.id);
-  await shot(page, '03-assign');
+  const wid = await page.locator('select[name=worker] option', { hasText: 'سالم السائق' }).getAttribute('value');
+  await page.selectOption('select[name=worker]', wid);
+  await shot(page, '04-assign');
   await page.click('.modal button.primary:has-text("إسناد")');
   await page.locator('.modal').waitFor({ state: 'detached' });
   await page.locator('text=لا توجد مهام بانتظار سائق').waitFor();
   ok('الإسناد من لوحة التوزيع يُخرج المهمة من القائمة');
-  await shot(page, '04-board');
+  await shot(page, '05-board');
 
-  // 5. Detail page: assigned, then cancel with a reason, timeline grows
-  await page.click('nav a:has-text("المهام")');
-  await page.click('td a:has-text("WEB-001")');
-  await page.locator('.badge:has-text("مسندة")').waitFor();
-  await page.locator('dd:has-text("سالم السائق")').waitFor();
+  // The driver works it from the app (simulated): accept, start, collect cash on delivery, complete
+  const status = (to_status) => j('/v1/driver/sync', { ops: [{ type: 'task_status', client_op_id: crypto.randomUUID(), task_id: taskId, to_status, occurred_at: new Date().toISOString() }] }, drv.access_token);
+  await status('accepted');
+  await status('in_progress');
+  await j('/v1/driver/cod', { client_op_id: crypto.randomUUID(), task_id: taskId, amount: '10.000' }, drv.access_token);
+  await status('completed');
+
+  await page.goto(`${WEB}/tasks/${taskId}`);
+  await page.locator('.badge:has-text("مكتملة")').first().waitFor();
+  await page.click('button:has-text("اعتماد المراجعة")');
+  await page.locator('h1 + .badge:has-text("مراجَعة")').waitFor();
+  await page.locator('.timeline li:has-text("قيد التنفيذ")').waitFor();
+  ok('السائق ينفّذ المهمة والمكتب يعتمد مراجعتها، والسجل يعرض كل المراحل');
+  await shot(page, '06-task-reviewed');
+
+  // A second task is canceled with a reason
+  const t2 = await page.evaluate(async (le) => (await (await fetch('/api/v1/tasks', { method: 'POST', headers: { 'content-type': 'application/json', 'x-fp-csrf': '1' },
+    body: JSON.stringify({ legal_entity_id: le, sector_pack: 'delivery@1', ref: 'WEB-002' }) })).json()).id, (await page.evaluate(async () => (await fetch('/api/v1/me')).json())).legal_entities[0].id);
+  await page.goto(`${WEB}/tasks/${t2}`);
   await page.click('button:has-text("إلغاء المهمة")');
   await page.fill('textarea[name=reason]', 'طلب العميل الإلغاء');
   await page.click('button:has-text("تأكيد الإلغاء")');
   await page.locator('.badge:has-text("ملغاة")').first().waitFor();
   await page.locator('.timeline li:has-text("طلب العميل الإلغاء")').waitFor();
-  ok('صفحة المهمة: الإلغاء بسبب يظهر في السجل');
-  await shot(page, '05-detail');
+  ok('إلغاء مهمة بسبب يظهر في السجل');
+
+  // Billing: invoice from the reviewed task, a manual line, issue
+  await page.click('nav a:has-text("الفواتير")');
+  await page.click('button:has-text("فاتورة جديدة")');
+  await page.locator('.modal select[name=customer_id] option:has-text("متجر الورد")').waitFor({ state: 'attached' });
+  await page.selectOption('.modal select[name=customer_id]', { label: 'متجر الورد' });
+  await page.click('.modal button:has-text("إنشاء المسودة")');
+  await page.waitForURL(/\/invoices\/[0-9a-f-]{36}/);
+  await page.locator('td:has-text("WEB-001")').waitFor();
+  await page.fill('input[name=description]', 'رسوم انتظار');
+  await page.fill('input[name=unit_price]', '0.500');
+  await page.click('button:has-text("إضافة")');
+  await page.locator('strong.num:has-text("2.000 KWD")').waitFor();
+  await page.click('button:has-text("إصدار الفاتورة")');
+  await page.locator('.badge:has-text("صادرة")').waitFor();
+  const number = (await page.locator('h1').textContent()).trim();
+  if (!/^INV-\d{4}-\d+/.test(number)) throw new Error(`unexpected invoice number ${number}`);
+  ok(`فاتورة من المهمة المراجَعة + بند يدوي، وإصدارها برقم ${number}`);
+  await shot(page, '07-invoice');
+
+  // Payment for the invoice → paid; statement closes at zero
+  await page.click('a:has-text("تسجيل دفعة لهذه الفاتورة")');
+  await page.fill('.modal input[name=amount]', '2.000');
+  await page.fill('.modal input[name=reference]', 'TRX-1001');
+  await page.click('.modal button:has-text("تسجيل")');
+  await page.locator('td:has-text("TRX-1001")').waitFor();
+  await page.goto(page.url().replace(/receivables.*/, 'invoices'));
+  await page.locator('tr:has-text("متجر الورد") .badge:has-text("مدفوعة")').waitFor();
+  await page.click('nav a:has-text("الذمم والتحصيل")');
+  await page.locator('text=لا توجد ذمم مفتوحة').waitFor();
+  await page.click('button[role=tab]:has-text("كشف حساب")');
+  await page.selectOption('select[name=customer_id]', { label: 'متجر الورد' });
+  await page.locator('tr:has-text("الرصيد الختامي") td.num:has-text("0.000 KWD")').waitFor();
+  ok('الدفعة تسدد الفاتورة، ولا ذمم مفتوحة، وكشف الحساب يُقفل على صفر');
+
+  // Cash on delivery: the driver hands in the cash, the merchant is paid out
+  await page.click('button[role=tab]:has-text("التحصيل عند الاستلام")');
+  await page.locator('tr:has-text("سالم السائق"):has-text("10.000 KWD") button').click();
+  await page.click('.modal button:has-text("تأكيد")');
+  await page.locator('text=لا يوجد نقد غير مسلَّم').waitFor();
+  await page.locator('tr:has-text("متجر الورد"):has-text("10.000 KWD") button').click();
+  await page.fill('.modal input[name=reference]', 'PAYOUT-1');
+  await page.click('.modal button:has-text("تأكيد")');
+  await page.locator('text=لا يوجد مستحق').waitFor();
+  ok('دورة التحصيل عند الاستلام: من السائق إلى المكتب ثم إلى التاجر');
+
+  await page.click('button[role=tab]:has-text("ميزان المراجعة")');
+  await page.locator('tr:has-text("الإجمالي") td.num').first().waitFor();
+  const totals = await page.locator('tr:has-text("الإجمالي") td.num').allTextContents();
+  if (totals.length !== 2 || totals[0] !== totals[1]) throw new Error(`trial balance not balanced: ${totals}`);
+  ok(`ميزان المراجعة متوازن (${totals[0]})`);
+  await shot(page, '08-trial-balance');
 
   // 6. Logout clears the session
   await page.click('button:has-text("خروج")');
