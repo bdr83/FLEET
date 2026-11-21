@@ -49,7 +49,16 @@ export class TenantsController {
   @UseGuards(AuthGuard)
   @Perm('org:read')
   me(@Auth() a: AuthContext) {
-    return { user_id: a.userId, tenant_id: a.tenantId, role: a.roleCode, permissions: a.permissions,
-             scope: { legal_entity_ids: a.entityIds, branch_ids: a.branchIds } };
+    return this.db.withTenant(a, async (c) => {
+      const t = (await c.query('SELECT name, status FROM org.tenant WHERE id = $1', [a.tenantId])).rows[0];
+      const u = (await c.query('SELECT phone, display_name FROM org.app_user WHERE id = $1', [a.userId])).rows[0];
+      const entities = (await c.query(
+        `SELECT id, name, country, currency, timezone FROM org.legal_entity WHERE cardinality($1::uuid[]) = 0 OR id = ANY($1::uuid[]) ORDER BY name`,
+        [a.entityIds])).rows;
+      return { user_id: a.userId, phone: u?.phone ?? null, display_name: u?.display_name ?? null,
+               tenant_id: a.tenantId, tenant_name: t?.name ?? null, tenant_status: t?.status ?? null,
+               role: a.roleCode, permissions: a.permissions,
+               scope: { legal_entity_ids: a.entityIds, branch_ids: a.branchIds }, legal_entities: entities };
+    });
   }
 }

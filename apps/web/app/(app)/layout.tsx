@@ -1,0 +1,70 @@
+'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { api, session } from '@/lib/api';
+import { can, Me, MeContext } from '@/components/me';
+import { ROLE } from '@/lib/format';
+
+const NAV: { sec?: string; href?: string; label?: string; perm?: string }[] = [
+  { sec: 'العمليات' },
+  { href: '/', label: 'لوحة التوزيع', perm: 'tasks:read' },
+  { href: '/tasks', label: 'المهام', perm: 'tasks:read' },
+  { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
+  { sec: 'الأسطول' },
+  { href: '/assets', label: 'المركبات', perm: 'fleet:read' },
+  { href: '/workers', label: 'السائقون', perm: 'fleet:read' },
+  { href: '/documents', label: 'الوثائق', perm: 'fleet:read' },
+  { href: '/maintenance', label: 'الصيانة', perm: 'fleet:read' },
+  { href: '/expenses', label: 'المصروفات', perm: 'fleet:read' },
+  { sec: 'العملاء والمالية' },
+  { href: '/customers', label: 'العملاء', perm: 'customers:read' },
+  { href: '/contracts', label: 'العقود', perm: 'customers:read' },
+  { href: '/invoices', label: 'الفواتير', perm: 'billing:read' },
+  { href: '/receivables', label: 'الذمم والتحصيل', perm: 'billing:read' },
+  { sec: 'التحليل والإعداد' },
+  { href: '/reports', label: 'التقارير', perm: 'reports:read' },
+  { href: '/settings', label: 'الإعدادات', perm: 'org:read' },
+];
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const [me, setMe] = useState<Me | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const path = usePathname();
+  useEffect(() => { api<Me>('/me').then(setMe).catch((e) => setFailed(e.message)); }, []);
+  useEffect(() => setOpen(false), [path]);
+
+  if (failed) return <div className="login"><div className="card"><p>{failed}</p><Link href="/login">تسجيل الدخول</Link></div></div>;
+  if (!me) return <div className="login muted">جارٍ التحميل…</div>;
+
+  const isOn = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
+  return (
+    <MeContext.Provider value={me}>
+      <div className="shell">
+        <aside className={`side ${open ? 'open' : ''}`} aria-label="القائمة">
+          <div className="brand">إدارة الأساطيل</div>
+          <nav className="nav">
+            {NAV.map((n, i) => n.sec
+              ? <div className="sec" key={i}>{n.sec}</div>
+              : (!n.perm || can(me, n.perm)) && <Link key={n.href} href={n.href!} className={isOn(n.href!) ? 'on' : ''}>{n.label}</Link>)}
+          </nav>
+        </aside>
+        <div className="main">
+          <header className="top">
+            <div className="row">
+              <button className="menu-btn small" onClick={() => setOpen(!open)} aria-label="القائمة">☰</button>
+              <strong>{me.tenant_name}</strong>
+              {me.tenant_status === 'trial' && <span className="badge t-warning">تجريبي</span>}
+            </div>
+            <div className="row">
+              <span className="muted">{me.display_name ?? <span className="num">{me.phone}</span>} · {ROLE[me.role] ?? me.role}</span>
+              <button className="small" onClick={async () => { await session('logout'); location.href = '/login'; }}>خروج</button>
+            </div>
+          </header>
+          <main className="page">{children}</main>
+        </div>
+      </div>
+    </MeContext.Provider>
+  );
+}

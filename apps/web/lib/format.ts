@@ -1,0 +1,70 @@
+export const TZ = 'Asia/Kuwait';
+
+/** Dates in Kuwait time as dd/mm/yyyy hh:mm (24h, Latin digits) so they read the same inside LTR number cells. */
+function parts(v: string, o: Intl.DateTimeFormatOptions) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hourCycle: 'h23', ...o }).formatToParts(new Date(v)).map((x) => [x.type, x.value]));
+  return p as Record<string, string>;
+}
+export function dt(v: string | null | undefined) {
+  if (!v) return '—';
+  const p = parts(v, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
+}
+export function time(v: string | null | undefined) {
+  if (!v) return '—';
+  const p = parts(v, { hour: '2-digit', minute: '2-digit' });
+  return `${p.hour}:${p.minute}`;
+}
+export function day(v: string | null | undefined) {
+  if (!v) return '—';
+  const p = parts(v, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return `${p.day}/${p.month}/${p.year}`;
+}
+
+/** Amounts arrive as strings with 3 decimals; shown with the currency code. */
+export function money(v: string | number | null | undefined, currency = 'KWD') {
+  if (v === null || v === undefined || v === '') return '—';
+  const n = Number(v);
+  return `${n.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${currency}`;
+}
+
+export function todayKw(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+}
+
+export const TASK_STATUS: Record<string, { label: string; tone: string }> = {
+  draft: { label: 'مسودة', tone: 'muted' },
+  ready: { label: 'جاهزة', tone: 'info' },
+  assigned: { label: 'مسندة', tone: 'info' },
+  accepted: { label: 'مقبولة', tone: 'primary' },
+  in_progress: { label: 'قيد التنفيذ', tone: 'warning' },
+  completed: { label: 'مكتملة', tone: 'success' },
+  reviewed: { label: 'مراجَعة', tone: 'success' },
+  invoiced: { label: 'مفوترة', tone: 'muted' },
+  failed: { label: 'فاشلة', tone: 'danger' },
+  canceled: { label: 'ملغاة', tone: 'muted' },
+};
+export const ROLE: Record<string, string> = {
+  owner: 'مالك', admin: 'مدير', dispatcher: 'موزّع', accountant: 'محاسب', branch_supervisor: 'مشرف فرع', driver: 'سائق', customer: 'عميل',
+};
+export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي' };
+export const packLabel = (p: string) => PACKS[p] ?? p;
+
+/** One readable line from a task's free-form attributes (address, recipient, product). */
+export function taskSummary(attrs: Record<string, unknown> | null | undefined): string {
+  if (!attrs) return '—';
+  const pick = (o: unknown, k: string) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined);
+  const parts = [
+    attrs.title, attrs.address, pick(attrs.dropoff, 'address'), attrs.recipient_name, pick(attrs.recipient, 'name'), attrs.product,
+  ].filter((x): x is string => typeof x === 'string' && x.length > 0);
+  return parts.length ? parts.slice(0, 2).join(' · ') : '—';
+}
+
+export function ago(v: string | null | undefined): string {
+  if (!v) return '—';
+  const m = Math.round((Date.now() - new Date(v).getTime()) / 60000);
+  if (m < 1) return 'الآن';
+  if (m < 60) return `قبل ${m} د`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `قبل ${h} س` : day(v);
+}
