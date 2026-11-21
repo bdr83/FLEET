@@ -84,3 +84,13 @@ export const DOC_TYPE: Record<string, string> = {
   driving_license: 'رخصة قيادة', vehicle_registration: 'دفتر المركبة', insurance: 'تأمين', civil_id: 'البطاقة المدنية',
   residency: 'إقامة', work_permit: 'إذن عمل', inspection: 'فحص فني', other: 'أخرى',
 };
+
+export const CUSTOMER_STATUS: Record<string, { label: string; tone: string }> = {
+  active: tone('نشط', 'success'), on_hold: tone('موقوف مؤقتًا', 'warning'), closed: tone('مغلق'),
+};
+export const CONTRACT_STATUS: Record<string, { label: string; tone: string }> = {
+  draft: tone('مسودة'), active: tone('ساري', 'success'), suspended: tone('معلّق', 'warning'), ended: tone('منتهي'),
+};
+export const UNIT: Record<string, string> = {
+  task: 'مهمة', km: 'كيلومتر', hour: 'ساعة', trip: 'رحلة', m3: 'متر مكعب', ton: 'طن', day: 'يوم', month: 'شهر',
+};

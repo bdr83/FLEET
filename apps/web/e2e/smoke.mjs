@@ -103,6 +103,37 @@ try {
   const w = { id: (await page.evaluate(async () => (await (await fetch('/api/v1/workers?status=active')).json()).data[0].id)) };
   void shift;
 
+  // Customers and contracts: customer with a site, a contract with a price, activate, price preview
+  await page.click('nav a:has-text("العملاء")');
+  await page.click('button:has-text("إضافة عميل")');
+  await page.fill('.modal input[name=name]', 'متجر الورد');
+  await page.fill('.modal input[name=payment_terms_days]', '15');
+  await page.click('.modal button:has-text("حفظ")');
+  await page.waitForURL(/\/customers\/[0-9a-f-]{36}$/);
+  await page.click('button:has-text("إضافة موقع")');
+  await page.fill('.modal input[name=name]', 'المستودع الرئيسي');
+  await page.fill('.modal input[name=lat]', '29.3375');
+  await page.fill('.modal input[name=lng]', '48.0186');
+  await page.click('.modal button:has-text("حفظ")');
+  await page.locator('td:has-text("المستودع الرئيسي")').waitFor();
+  ok('إضافة عميل وموقع');
+
+  await page.click('a:has-text("عقد جديد")');
+  await page.locator('.modal select[name=customer_id] option:has-text("متجر الورد")').waitFor({ state: 'attached' });
+  await page.click('.modal button:has-text("إنشاء المسودة")');
+  await page.waitForURL(/\/contracts\/[0-9a-f-]{36}$/);
+  await page.selectOption('select[name=sector_pack]', 'delivery@1');
+  await page.fill('input[name=price]', '1.500');
+  await page.click('button:has-text("إضافة السعر")');
+  await page.locator('td:has-text("1.500 KWD")').waitFor();
+  await page.click('button:has-text("تفعيل العقد")');
+  await page.locator('.badge:has-text("ساري")').waitFor();
+  if (await page.locator('button:has-text("إضافة السعر")').count()) throw new Error('rates still editable after activation');
+  await page.click('button:has-text("احسب")');
+  await page.locator('strong.num:has-text("1.500 KWD")').waitFor();
+  ok('عقد بسعر توصيل، تفعيله يجمّد الأسعار، وحاسبة السعر صحيحة');
+  await shot(page, '02c-contract');
+
   // Create a task from the form
   await page.click('nav a:has-text("المهام")');
   await page.locator('h1:has-text("المهام")').waitFor();
@@ -110,6 +141,7 @@ try {
   await page.fill('input[name=ref]', 'WEB-001');
   await page.fill('input[name=address]', 'السالمية، قطعة 5، شارع 10');
   await page.fill('input[name=recipient_name]', 'أحمد');
+  await page.selectOption('select[name=customer_id]', { label: 'متجر الورد' });
   await shot(page, '02-new-task');
   await page.click('.modal button:has-text("إنشاء")');
   await page.waitForURL(/\/tasks\/[0-9a-f-]{36}$/);
