@@ -13,10 +13,11 @@ import { AssetsController } from './fleet/assets.controller';
 import { WorkersController } from './fleet/workers.controller';
 import { DocumentsController } from './fleet/documents.controller';
 import { DriverController } from './driver/driver.controller';
+import { DispatchController } from './dispatch/dispatch.controller';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TasksController],
   providers: [
     DbService,
     OtpService,

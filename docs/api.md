@@ -71,6 +71,27 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 - الوقت المقبول من الجهاز: حتى 7 أيام للخلف و5 دقائق للأمام.
 - لا تتبع خارج المناوبة (D6)، وتُحذف نقاط المواقع بعد 90 يومًا تلقائيًا (`LOCATION_RETENTION_DAYS`).
 
-## المهام (مؤقت حتى P4)
+## المهام والتوزيع (P4)
 
-`GET /tasks`، `GET /tasks/:id`، `POST /tasks`.
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET | `/tasks?status=a,b&worker_id=&branch_id=&from=&to=&unassigned=true` | tasks:read | قائمة المهام مع السائق والمركبة |
+| GET | `/tasks/:id` | tasks:read | المهمة مع سجل الحالات (`events`) |
+| POST | `/tasks` | tasks:write | `{legal_entity_id, sector_pack, branch_id?, window?:{from,to}, attributes?, ref?, draft?}`. `ref` يمنع تكرار الطلب نفسه |
+| PATCH | `/tasks/:id` | tasks:write | `{version, attributes?, window?, branch_id?}`. قبل بدء السائق فقط |
+| POST | `/tasks/:id/publish` | tasks:write | مسودة → جاهزة |
+| POST | `/tasks/:id/assign` | tasks:assign | `{version, worker_id, asset_id?, exclusive?}`. إسناد أو إعادة إسناد |
+| POST | `/tasks/:id/unassign` | tasks:assign | تعود للطابور |
+| POST | `/tasks/:id/cancel` | tasks:write | `{version, reason}` |
+| POST | `/tasks/:id/review` | tasks:write | مكتملة → مراجَعة |
+| POST | `/tasks/:id/reopen` | tasks:write | فاشلة → جاهزة لإسناد جديد |
+| GET | `/dispatch/board?date=YYYY-MM-DD&tz=Asia/Kuwait` | tasks:read | أعداد اليوم حسب الحالة، طابور غير المسندة، السائقون مع المناوبة وعدد المهام وآخر موقع |
+| GET | `/shifts?open=true&worker_id=` | fleet:read | المناوبات |
+| POST | `/shifts/:id/end` | fleet:write | `{reason}`. إنهاء مناوبة نسيها السائق، ويتوقف التتبع فورًا |
+
+قواعد:
+- كل تعديل أو انتقال يتطلب `version` الحالي، وإلا 409 مع `current_version` (منع ضياع التعديلات بين مشرفَين).
+- `exclusive: true` يمنع تداخل حجوزات السائق نفسه (سائق مؤجَّر، رحلة خلاطة). بدونه يمكن إسناد عدة طلبات توصيل متزامنة.
+- المركبة لا تُحجز في مهمتين متداخلتين أبدًا. في التوصيل تُربط المركبة بالمناوبة لا بكل طلب.
+- السائق والمركبة من الشركة القانونية نفسها للمهمة.
+- آخر موقع لا يظهر في اللوحة إلا للسائق الذي في مناوبة مفتوحة (D6).
