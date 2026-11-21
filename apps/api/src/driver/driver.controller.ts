@@ -1,11 +1,12 @@
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import type { PoolClient } from 'pg';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { v } from '../common/validate';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
+import { FAIL_REASONS, isDelivery, needsProof, PIN_MAX_ATTEMPTS, Stage, STAGE_ALLOWED, STAGES } from '../sectors/delivery/delivery';
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
 export const MAX_AGE_MS = 7 * 86_400_000;
@@ -211,16 +212,22 @@ export class DriverController {
   /** The caller's current tasks (assigned to them and not finished). */
   @Get('tasks')
   @Perm('tasks:read_own')
-  tasks(@Auth() a: AuthContext) {
+  tasks(@Auth() a: AuthContext, @Query('include') include?: string) {
+    // include=returns adds failed deliveries still to be returned to the sender
+    const returns = include === 'returns';
     return this.db.withTenant(a, async (c) => {
       const w = await this.me(c, a, { active: false });
       return {
         data: (await c.query(
           `SELECT t.id, t.status, t.sector_pack, lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
-                  t.attributes, t.version, asg.asset_id
+                  t.attributes, t.version, asg.asset_id,
+                  (SELECT m.code FROM ops.task_milestone m WHERE m.task_id = t.id ORDER BY m.occurred_at DESC LIMIT 1) AS stage,
+                  EXISTS (SELECT 1 FROM ops.delivery_pod p WHERE p.task_id = t.id) AS has_proof
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE t.status IN ('assigned','accepted','in_progress')
-            ORDER BY lower(t.service_window) NULLS LAST, t.id LIMIT 200`, [w.id])).rows,
+               OR ($2 AND t.status = 'failed' AND t.sector_pack = 'delivery@1'
+                   AND NOT EXISTS (SELECT 1 FROM ops.task_milestone m WHERE m.task_id = t.id AND m.code = 'returned_to_sender'))
+            ORDER BY lower(t.service_window) NULLS LAST, t.id LIMIT 200`, [w.id, returns])).rows,
       };
     });
   }
@@ -228,6 +235,7 @@ export class DriverController {
   /**
    * Offline sync: the app queues actions with a client_op_id and sends them in order when online.
    * Each op is applied once; a re-sent op returns "duplicate". One bad op does not block the rest.
+   * Op types: task_status (core), milestone (a stage inside the task, e.g. picked_up) and pod (proof of delivery).
    */
   @Post('sync')
   @HttpCode(200)
@@ -235,48 +243,131 @@ export class DriverController {
   sync(@Auth() a: AuthContext, @Body() b: Record<string, unknown>) {
     const ops = b?.ops;
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
-    const parsed = ops.map((o: Record<string, unknown>, i: number) => {
+    const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      v.oneOf(o.type, `ops[${i}].type`, ['task_status'] as const, { required: true });
-      return {
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod'] as const, { required: true })!;
+      const base = {
+        type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
         task_id: v.uuid(o.task_id, `ops[${i}].task_id`, { required: true })!,
-        to_status: v.str(o.to_status, `ops[${i}].to_status`, { required: true, max: 20 })!,
         occurred_at: ts(o.occurred_at, `ops[${i}].occurred_at`, { required: true })!,
         note: v.str(o.note, `ops[${i}].note`, { max: 500 }),
       };
+      if (type === 'task_status') {
+        return { ...base, type: 'task_status' as const, to_status: v.str(o.to_status, `ops[${i}].to_status`, { required: true, max: 20 })!, reason_code: v.oneOf(o.reason_code, `ops[${i}].reason_code`, FAIL_REASONS) };
+      }
+      if (type === 'milestone') {
+        return { ...base, type: 'milestone' as const, code: v.oneOf(o.code, `ops[${i}].code`, STAGES, { required: true })!,
+          lat: num(o.lat, `ops[${i}].lat`, -90, 90), lng: num(o.lng, `ops[${i}].lng`, -180, 180) };
+      }
+      const method = v.oneOf(o.method, `ops[${i}].method`, ['pin', 'photo', 'signature'] as const, { required: true })!;
+      const pin = method === 'pin' ? v.str(o.pin, `ops[${i}].pin`, { required: true, max: 4 }) : null;
+      if (pin !== null && !/^[0-9]{4}$/.test(pin)) throw new BadRequestException(`ops[${i}].pin must be 4 digits`);
+      const file_key = v.str(o.file_key, `ops[${i}].file_key`, { max: 300 });
+      const recipient_name = v.str(o.recipient_name, `ops[${i}].recipient_name`, { max: 120 });
+      if (method !== 'pin' && !file_key && !recipient_name) throw new BadRequestException(`ops[${i}] needs file_key or recipient_name`);
+      return { ...base, type: 'pod' as const, method, pin, file_key, recipient_name };
     });
     return this.db.withTenant(a, async (c) => {
       const w = await this.me(c, a);
-      const results: { client_op_id: string; result: 'applied' | 'duplicate' | 'rejected'; reason?: string; status?: string }[] = [];
+      const results: { client_op_id: string; result: 'applied' | 'duplicate' | 'rejected'; reason?: string; status?: string; verified?: boolean }[] = [];
       for (const op of parsed) {
-        const done = (await c.query('SELECT to_status FROM ops.task_event WHERE client_op_id = $1', [op.client_op_id])).rows[0];
-        if (done) { results.push({ client_op_id: op.client_op_id, result: 'duplicate', status: done.to_status }); continue; }
+        if (await isDuplicate(c, op)) { results.push({ client_op_id: op.client_op_id, result: 'duplicate', ...(await dupStatus(c, op)) }); continue; }
         const reject = (reason: string, status?: string) => results.push({ client_op_id: op.client_op_id, result: 'rejected', reason, ...(status ? { status } : {}) });
         if (!inWindow(op.occurred_at)) { reject('bad_time'); continue; }
         const t = (await c.query(
-          `SELECT t.status FROM ops.task t
+          `SELECT t.status, t.sector_pack, t.legal_entity_id, t.attributes FROM ops.task t
             WHERE t.id = $1 AND EXISTS (SELECT 1 FROM ops.assignment x WHERE x.task_id = t.id AND x.active AND x.worker_id = $2)
             FOR UPDATE OF t`, [op.task_id, w.id])).rows[0];
         if (!t) { reject('not_assigned_to_you'); continue; }
-        if (!(DRIVER_FLOW[t.status] ?? []).includes(op.to_status)) { reject('invalid_transition', t.status); continue; }
-        if (op.to_status === 'failed' && !op.note) { reject('reason_required', t.status); continue; }
-        await c.query('SAVEPOINT op');
-        try {
-          await c.query(
-            `INSERT INTO ops.task_event (id, tenant_id, task_id, from_status, to_status, occurred_at, actor_id, client_op_id, note)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-            [randomUUID(), a.tenantId, op.task_id, t.status, op.to_status, op.occurred_at, a.userId, op.client_op_id, op.note]);
-        } catch (e) {
-          // the same op arrived twice at once from two connections
-          await c.query('ROLLBACK TO SAVEPOINT op');
-          if ((e as { code?: string }).code === '23505') { results.push({ client_op_id: op.client_op_id, result: 'duplicate' }); continue; }
-          throw e;
+        const delivery = isDelivery(t.sector_pack);
+
+        if (op.type === 'milestone') {
+          if (!delivery) { reject('not_supported'); continue; }
+          if (!STAGE_ALLOWED[op.code].includes(t.status)) { reject('invalid_stage', t.status); continue; }
+          if (await this.insertOnce(c, `INSERT INTO ops.task_milestone (id, tenant_id, task_id, code, occurred_at, actor_id, client_op_id, lat, lng, note)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [randomUUID(), a.tenantId, op.task_id, op.code, op.occurred_at, a.userId, op.client_op_id, op.lat, op.lng, op.note])) {
+            results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
+          } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
+          continue;
         }
-        await c.query('UPDATE ops.task SET status = $2, version = version + 1 WHERE id = $1', [op.task_id, op.to_status]);
-        results.push({ client_op_id: op.client_op_id, result: 'applied', status: op.to_status });
+
+        if (op.type === 'pod') {
+          if (!delivery) { reject('not_supported'); continue; }
+          if (!['accepted', 'in_progress'].includes(t.status)) { reject('invalid_transition', t.status); continue; }
+          const prior = (await c.query('SELECT verified FROM ops.delivery_pod WHERE task_id = $1', [op.task_id])).rows[0];
+          if (prior?.verified) { reject('already_proven', t.status); continue; }
+          let verified = false;
+          if (op.method === 'pin') {
+            const link = (await c.query('SELECT pin, pin_attempts FROM ops.delivery_link WHERE task_id = $1 FOR UPDATE', [op.task_id])).rows[0];
+            if (!link) { reject('no_pin', t.status); continue; }
+            if (link.pin_attempts >= PIN_MAX_ATTEMPTS) { reject('pin_locked', t.status); continue; }
+            if (!safeEqual(link.pin, op.pin!)) {
+              // kept even though the op is rejected: the counter is what stops guessing
+              await c.query('UPDATE ops.delivery_link SET pin_attempts = pin_attempts + 1 WHERE task_id = $1', [op.task_id]);
+              reject(link.pin_attempts + 1 >= PIN_MAX_ATTEMPTS ? 'pin_locked' : 'wrong_pin', t.status); continue;
+            }
+            verified = true;
+          }
+          if (prior) await c.query('DELETE FROM ops.delivery_pod WHERE task_id = $1 AND NOT verified', [op.task_id]);
+          if (await this.insertOnce(c, `INSERT INTO ops.delivery_pod (tenant_id, task_id, method, recipient_name, file_key, verified, client_op_id, created_at)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [a.tenantId, op.task_id, op.method, op.recipient_name, op.file_key, verified, op.client_op_id, op.occurred_at])) {
+            results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status, verified });
+          } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
+          continue;
+        }
+
+        if (!(DRIVER_FLOW[t.status] ?? []).includes(op.to_status)) { reject('invalid_transition', t.status); continue; }
+        const reasonCode = delivery ? op.reason_code : null;
+        if (op.to_status === 'failed' && !op.note && !reasonCode) { reject('reason_required', t.status); continue; }
+        if (op.to_status === 'completed' && delivery && (await needsProof(c, t))
+          && !(await c.query('SELECT 1 FROM ops.delivery_pod WHERE task_id = $1', [op.task_id])).rowCount) {
+          reject('proof_required', t.status); continue;
+        }
+        if (await this.insertOnce(c,
+          `INSERT INTO ops.task_event (id, tenant_id, task_id, from_status, to_status, occurred_at, actor_id, client_op_id, note, reason_code)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [randomUUID(), a.tenantId, op.task_id, t.status, op.to_status, op.occurred_at, a.userId, op.client_op_id, op.note, op.to_status === 'failed' ? reasonCode : null])) {
+          await c.query('UPDATE ops.task SET status = $2, version = version + 1 WHERE id = $1', [op.task_id, op.to_status]);
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: op.to_status });
+        } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
       }
       return { results };
     });
   }
+
+  /** Inserts once; false when the same op arrived twice at once from two connections (unique client_op_id). */
+  private async insertOnce(c: PoolClient, sql: string, params: unknown[]) {
+    await c.query('SAVEPOINT op');
+    try {
+      await c.query(sql, params);
+      return true;
+    } catch (e) {
+      await c.query('ROLLBACK TO SAVEPOINT op');
+      if ((e as { code?: string }).code === '23505') return false;
+      throw e;
+    }
+  }
+}
+
+type SyncOp =
+  | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
+  | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: Stage; lat: number | null; lng: number | null }
+  | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
+
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod' } as const;
+async function isDuplicate(c: PoolClient, op: SyncOp) {
+  return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE client_op_id = $1`, [op.client_op_id])).rowCount;
+}
+async function dupStatus(c: PoolClient, op: SyncOp) {
+  if (op.type !== 'task_status') return {};
+  const r = (await c.query('SELECT to_status FROM ops.task_event WHERE client_op_id = $1', [op.client_op_id])).rows[0];
+  return r ? { status: r.to_status as string } : {};
+}
+
+function safeEqual(x: string, y: string) {
+  const a = Buffer.from(x), b = Buffer.from(y);
+  return a.length === b.length && timingSafeEqual(a, b);
 }

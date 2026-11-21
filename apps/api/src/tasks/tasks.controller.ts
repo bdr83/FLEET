@@ -7,6 +7,7 @@ import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { pgToHttp, v } from '../common/validate';
 import { canStaff, EDITABLE, STAFF_FLOW, StaffAction, TASK_STATUSES } from './task-flow';
+import { createLink, isDelivery, needsProof, normalizeAttributes } from '../sectors/delivery/delivery';
 
 const COLUMNS = `t.id, t.ref, t.legal_entity_id, t.branch_id, t.sector_pack, t.status,
   lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
@@ -98,12 +99,13 @@ export class TasksController {
   @Perm('tasks:write')
   update(@Auth() a: AuthContext, @Param('id', new ParseUUIDPipe()) id: string, @Body() b: Record<string, unknown>) {
     const ver = version(b);
-    const attrs = v.obj(b?.attributes, 'attributes');
+    let attrs = v.obj(b?.attributes, 'attributes');
     const branch = v.uuid(b?.branch_id, 'branch_id');
     const win = parseWindow(b ?? {});
     return this.db.withTenant(a, async (c) => {
       const t = await this.lock(c, id, ver);
       if (!(EDITABLE as string[]).includes(t.status)) throw new ConflictException(`cannot edit a task that is ${t.status}`);
+      if (attrs && isDelivery(t.sector_pack)) attrs = normalizeAttributes(attrs);
       try {
         await c.query(
           `UPDATE ops.task SET attributes = COALESCE($2::jsonb, attributes), branch_id = COALESCE($3, branch_id),
@@ -195,6 +197,11 @@ export class TasksController {
     return this.db.withTenant(a, async (c) => {
       const t = await this.lock(c, id, ver);
       if (!canStaff(action, t.status)) throw new ConflictException(`cannot ${action} a task that is ${t.status}`);
+      if (action === 'review' && isDelivery(t.sector_pack)) {
+        const pod = (await c.query('SELECT verified FROM ops.delivery_pod WHERE task_id = $1', [id])).rows[0];
+        if (pod && !pod.verified) throw new ConflictException('approve the proof of delivery first');
+        if (!pod && (await needsProof(c, t))) throw new ConflictException('proof of delivery missing');
+      }
       if (o.endAssignment) await c.query('UPDATE ops.assignment SET active = false, ended_at = now() WHERE task_id = $1 AND active', [id]);
       return this.transition(c, a, id, t.status, action, note);
     });
@@ -202,7 +209,7 @@ export class TasksController {
 
   /** Locks the task row and checks the caller saw the latest version (optimistic lock, QA 4.x). */
   private async lock(c: PoolClient, id: string, ver: number) {
-    const t = (await c.query('SELECT id, status, version, legal_entity_id FROM ops.task WHERE id = $1 FOR UPDATE', [id])).rows[0];
+    const t = (await c.query('SELECT id, status, version, legal_entity_id, sector_pack, attributes FROM ops.task WHERE id = $1 FOR UPDATE', [id])).rows[0];
     if (!t) throw new NotFoundException();
     if (t.version !== ver) throw new ConflictException({ message: 'task changed since you loaded it', current_version: t.version, status: t.status });
     return t;
@@ -259,6 +266,8 @@ export async function createTask(c: PoolClient, a: AuthContext, t: NewTask) {
     if (!t.customer) throw new BadRequestException('site_id needs customer_id');
     if (!(await c.query('SELECT 1 FROM crm.site WHERE id = $1 AND customer_id = $2 AND active', [t.site, t.customer])).rowCount) throw new BadRequestException('unknown site_id for this customer');
   }
+  const delivery = isDelivery(t.pack);
+  if (delivery) t = { ...t, attrs: normalizeAttributes(t.attrs) };
   const id = randomUUID();
   try {
     await c.query(
@@ -266,6 +275,7 @@ export async function createTask(c: PoolClient, a: AuthContext, t: NewTask) {
        VALUES ($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE tstzrange($7,$8) END,$9,COALESCE($10::jsonb,'{}'),$11,$12,$13,$14)`,
       [id, a.tenantId, t.le, t.branch, t.pack, t.status, t.win?.from ?? null, t.win?.to ?? null, t.ref, t.attrs && JSON.stringify(t.attrs), a.userId, t.customer, t.site, contract]);
   } catch (e) { return pgToHttp(e); }
+  if (delivery) await createLink(c, a.tenantId, id);
   const row = (await c.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE t.id = $1`, [id])).rows[0];
   await audit(c, { tenantId: a.tenantId, actorId: a.userId, actorType: a.customerId ? 'customer' : 'user', action: 'task.created', targetType: 'task', targetId: id, after: row });
   return row;
