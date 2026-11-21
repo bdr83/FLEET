@@ -53,6 +53,24 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 أنواع المركبات: car, motorbike, van, pickup, truck, mixer, pump, trailer, bus, other.
 أنواع الوثائق: driving_license, vehicle_registration, insurance, civil_id, residency, work_permit, inspection, other. [تحقق محلي] قائمة الوثائق الإلزامية لكل نشاط في الكويت.
 
+## تطبيق السائق (P3)
+
+كل الواجهات تعمل على سجل السائق المرتبط بالمستخدم الداخل، ولا تقبل رقم سائق من التطبيق.
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET | `/driver/me` | shift:own | بيانات السائق والمناوبة المفتوحة |
+| POST | `/driver/shifts` | shift:own | بدء مناوبة `{client_op_id, asset_id?, odometer_km?, started_at?}`. إعادة الطلب نفسه تعيد المناوبة نفسها. 409 إن كانت له مناوبة مفتوحة أو المركبة مع سائق آخر |
+| POST | `/driver/shifts/:id/end` | shift:own | إنهاء المناوبة `{odometer_km?, ended_at?}`. يعيد المركبة "متاحة"، والتكرار آمن |
+| POST | `/driver/locations` | shift:own | دفعة حتى 500 نقطة `{points:[{recorded_at, lat, lng, accuracy_m?, speed_mps?, heading?, battery_pct?, source?}]}`. تُحفظ فقط النقاط داخل مناوبة، وتُتجاهل المكررة. الرد: `received, stored, duplicates, outside_shift, out_of_window` |
+| GET | `/driver/tasks` | tasks:read_own | مهامي غير المنتهية |
+| POST | `/driver/sync` | tasks:update_own | طابور العمليات دون اتصال `{ops:[{type:'task_status', client_op_id, task_id, to_status, occurred_at, note?}]}`. لكل عملية نتيجة: applied أو duplicate أو rejected مع السبب |
+
+قواعد:
+- انتقالات السائق: assigned→accepted→in_progress→completed أو failed. الفشل يتطلب سببًا (`note`).
+- الوقت المقبول من الجهاز: حتى 7 أيام للخلف و5 دقائق للأمام.
+- لا تتبع خارج المناوبة (D6)، وتُحذف نقاط المواقع بعد 90 يومًا تلقائيًا (`LOCATION_RETENTION_DAYS`).
+
 ## المهام (مؤقت حتى P4)
 
 `GET /tasks`، `GET /tasks/:id`، `POST /tasks`.

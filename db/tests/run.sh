@@ -43,5 +43,9 @@ chk 8.3 err 'not balanced' "$S BEGIN; $J (gen_random_uuid(),'$A',gen_random_uuid
 chk 15.1 err 'permission denied' "$S UPDATE billing.ledger_entry SET amount=0"
 chk 15.2 err 'permission denied' "$S DELETE FROM core.audit_log"
 chk 15.3 err 'permission denied' "TRUNCATE billing.ledger_entry"
+P=$(psql "$ADMIN_DATABASE_URL" -X -tAq -c "SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent='geo.location_point'::regclass LIMIT 1")
+chk 16.1 err 'permission denied' "SELECT count(*) FROM $P"
+chk 16.2 ok 'maintained' "SELECT 'maintained' FROM (SELECT geo.maintain_location_partitions()) x"
+chk 16.3 err 'permission denied' "$S SELECT core.apply_tenant_rls()"
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

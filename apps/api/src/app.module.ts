@@ -12,14 +12,17 @@ import { OrgController } from './org/org.controller';
 import { AssetsController } from './fleet/assets.controller';
 import { WorkersController } from './fleet/workers.controller';
 import { DocumentsController } from './fleet/documents.controller';
+import { DriverController } from './driver/driver.controller';
+import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, TasksController],
   providers: [
     DbService,
     OtpService,
     SessionService,
     AuthGuard,
+    MaintenanceService,
     { provide: SMS_SENDER, useClass: LogSmsSender },
   ],
 })
