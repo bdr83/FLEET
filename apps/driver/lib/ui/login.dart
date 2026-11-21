@@ -93,6 +93,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   TextButton(onPressed: () => setState(() { _step = 0; _code.clear(); }), child: const Text('تغيير الرقم')),
                 ],
+                if (_step == 0) ...[
+                  const SizedBox(height: 24),
+                  TextButton.icon(
+                    onPressed: () => _server(context),
+                    icon: const Icon(Icons.dns_outlined, size: 18),
+                    label: Text('الخادم: ${Uri.parse(s.api.baseUrl).host}', textDirection: TextDirection.ltr),
+                  ),
+                ],
                 if (_step == 2) ...[
                   Text('اختر الشركة', style: t.titleMedium),
                   const SizedBox(height: 8),
@@ -109,6 +117,29 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _server(BuildContext context) async {
+    final s = AppScope.of(context);
+    final c = TextEditingController(text: s.api.baseUrl);
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('عنوان الخادم'),
+        content: TextField(controller: c, keyboardType: TextInputType.url, textDirection: TextDirection.ltr, decoration: const InputDecoration(hintText: 'https://api.example.com')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('حفظ')),
+        ],
+      ),
+    );
+    if (url == null) return;
+    try {
+      await s.setServer(url);
+      setState(() {});
+    } on FormatException catch (e) {
+      setState(() => _error = e.message);
+    }
   }
 
   /// Kuwaiti numbers may be typed without the country code.

@@ -36,7 +36,8 @@ class Api {
         tokens = tokens ?? TokenStore();
   final http.Client _http;
   final TokenStore tokens;
-  final String baseUrl;
+  /// Set at build time (API_URL); can be changed on the login screen for a pilot or test server.
+  String baseUrl;
   String? _access, _refresh;
   void Function()? onSignedOut;
 

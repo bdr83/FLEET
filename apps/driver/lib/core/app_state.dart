@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'api.dart';
 import 'config.dart';
@@ -32,7 +33,19 @@ class AppState extends ChangeNotifier {
 
   bool get signedIn => api.signedIn;
 
+  /// Server address chosen on the login screen (pilot/test servers); falls back to the build-time API_URL.
+  Future<void> setServer(String url) async {
+    final u = url.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(u);
+    if (uri == null || !(uri.scheme == 'https' || uri.scheme == 'http') || uri.host.isEmpty) throw const FormatException('عنوان غير صالح');
+    api.baseUrl = u;
+    await (await SharedPreferences.getInstance()).setString('server', u);
+    notifyListeners();
+  }
+
   Future<void> boot() async {
+    final saved = (await SharedPreferences.getInstance()).getString('server');
+    if (saved != null) api.baseUrl = saved;
     api.onSignedOut = () { worker = null; shift = null; tasks = []; notifyListeners(); };
     await queue.init();
     await tracker.init();
