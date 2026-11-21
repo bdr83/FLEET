@@ -113,3 +113,12 @@ label.field > input, label.field > select, label.field > textarea { color: var(-
 .dl dd { margin: 0; overflow-wrap: anywhere; }
 a.btn:hover { text-decoration: none; }
 dd.num, td.num, div.num { text-align: right; } /* LTR numbers still align to the RTL start edge */
+
+/* live map */
+.map-grid { display: grid; grid-template-columns: 1fr 320px; gap: 16px; height: calc(100vh - 170px); min-height: 420px; }
+.map { padding: 0; overflow: hidden; min-height: 420px; }
+.driver-row { display: grid; gap: 4px; width: 100%; text-align: start; justify-items: start; }
+.driver-row.on { border-color: var(--primary); background: var(--primary-soft); }
+.leaflet-container { font: inherit; }
+@media (max-width: 900px) { .map-grid { grid-template-columns: 1fr; height: auto; } .map { height: 60vh; } }
+.leaflet-container { direction: ltr; }

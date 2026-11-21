@@ -77,3 +77,28 @@ export function Kpi({ label, value, tone }: { label: string; value: React.ReactN
     </div>
   );
 }
+
+export function Tone({ map, value }: { map: Record<string, { label: string; tone: string }>; value: string }) {
+  const s = map[value] ?? { label: value, tone: 'muted' };
+  return <span className={`badge t-${s.tone}`}>{s.label}</span>;
+}
+
+/** A small typed form-state helper: f.x values plus bind('x') for inputs and selects. */
+export function useForm<T extends Record<string, string | boolean>>(init: T) {
+  const [f, setF] = useState<T>(init);
+  const bind = (k: keyof T) => ({
+    name: String(k),
+    value: f[k] as string,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value })),
+  });
+  const check = (k: keyof T) => ({
+    name: String(k), checked: !!f[k], type: 'checkbox' as const, style: { width: 'auto' },
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setF((p) => ({ ...p, [k]: e.target.checked })),
+  });
+  return { f, setF, bind, check };
+}
+
+/** Drops empty strings so optional fields are simply left out of the request. */
+export function clean<T extends Record<string, unknown>>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v !== undefined)) as Partial<T>;
+}

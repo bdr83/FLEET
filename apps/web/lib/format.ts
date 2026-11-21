@@ -68,3 +68,19 @@ export function ago(v: string | null | undefined): string {
   const h = Math.round(m / 60);
   return h < 24 ? `قبل ${h} س` : day(v);
 }
+
+const tone = (label: string, t = 'muted') => ({ label, tone: t });
+export const ASSET_TYPE: Record<string, string> = {
+  car: 'سيارة', motorbike: 'دراجة نارية', van: 'فان', pickup: 'بيك أب', truck: 'شاحنة', mixer: 'خلاطة خرسانة', pump: 'مضخة', trailer: 'مقطورة', bus: 'باص', other: 'أخرى',
+};
+export const ASSET_STATUS: Record<string, { label: string; tone: string }> = {
+  available: tone('متاحة', 'success'), in_use: tone('قيد الاستخدام', 'info'), out_of_service: tone('خارج الخدمة', 'danger'), retired: tone('مستبعدة'),
+};
+export const WORKER_KIND: Record<string, string> = { driver: 'سائق', courier: 'مندوب توصيل', technician: 'فني', supervisor: 'مشرف', guard: 'حارس' };
+export const WORKER_STATUS: Record<string, { label: string; tone: string }> = {
+  active: tone('نشط', 'success'), on_leave: tone('في إجازة', 'warning'), suspended: tone('موقوف', 'danger'), left: tone('غادر'),
+};
+export const DOC_TYPE: Record<string, string> = {
+  driving_license: 'رخصة قيادة', vehicle_registration: 'دفتر المركبة', insurance: 'تأمين', civil_id: 'البطاقة المدنية',
+  residency: 'إقامة', work_permit: 'إذن عمل', inspection: 'فحص فني', other: 'أخرى',
+};

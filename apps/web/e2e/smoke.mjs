@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const WEB = process.env.WEB_URL ?? 'http://localhost:3001';
+const API = process.env.API_URL ?? 'http://localhost:3000';
 const SHOTS = process.env.SHOTS_DIR;
 const phone = `+9655${String(Date.now()).slice(-7)}`;
 let step = 0;
@@ -44,15 +45,67 @@ try {
   if (csrf !== 403) throw new Error(`csrf check returned ${csrf}`);
   ok('طلب بلا ترويسة CSRF مرفوض');
 
-  // Seed a driver through the same proxy (workers screen comes in W2)
-  const me = await page.evaluate(async () => (await fetch('/api/v1/me')).json());
-  const w = await page.evaluate(async (le) => (await fetch('/api/v1/workers', {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-fp-csrf': '1' },
-    body: JSON.stringify({ legal_entity_id: le, kind: 'driver', display_name: 'سالم السائق' }),
-  })).json(), me.legal_entities[0].id);
-  if (!w.id) throw new Error(`worker create failed: ${JSON.stringify(w)}`);
+  // Fleet screens: add a vehicle, a driver with a phone (enables the driver app), and a document that expires soon
+  await page.click('nav a:has-text("المركبات")');
+  await page.click('button:has-text("إضافة مركبة")');
+  await page.fill('input[name=plate_no]', '12-34567');
+  await page.fill('input[name=make]', 'Toyota');
+  await page.fill('input[name=odometer_km]', '15000');
+  await page.click('.modal button:has-text("حفظ")');
+  await page.locator('td:has-text("12-34567")').waitFor();
+  ok('إضافة مركبة');
 
-  // 3. Create a task from the form
+  const driverPhone = `+9656${String(Date.now()).slice(-7)}`;
+  await page.click('nav a:has-text("السائقون")');
+  await page.click('button:has-text("إضافة سائق")');
+  await page.fill('input[name=display_name]', 'سالم السائق');
+  await page.fill('input[name=phone]', driverPhone);
+  await page.click('.modal button:has-text("حفظ")');
+  await page.locator('td:has-text("سالم السائق")').waitFor();
+  await page.click('td:has-text("سالم السائق")');
+  const soon = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+  await page.fill('.modal input[name=number]', 'DL-998877');
+  await page.fill('.modal input[name=expires_on]', soon);
+  await page.click('.modal button:has-text("إضافة وثيقة")');
+  await page.locator('.modal .badge:has-text("تنتهي خلال")').waitFor();
+  await page.keyboard.press('Escape');
+  await page.click('nav a:has-text("الوثائق")');
+  await page.locator('tr:has-text("DL-998877")').waitFor();
+  ok('إضافة سائق بجواله ووثيقة تظهر في تنبيهات الانتهاء');
+  await shot(page, '02a-documents');
+
+  // The driver logs in from the (future) mobile app: simulated straight against the API
+  const tenantId = (await page.evaluate(async () => (await fetch('/api/v1/me')).json())).tenant_id;
+  const j = async (path, body, token) => {
+    const r = await fetch(`${API}${path}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body && JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`${path} ${r.status} ${JSON.stringify(data)}`);
+    return data;
+  };
+  const otp = await j('/v1/auth/otp/request', { phone: driverPhone });
+  const ver = await j('/v1/auth/otp/verify', { phone: driverPhone, code: otp.dev_code });
+  const drv = await j('/v1/auth/token', { tenant_id: tenantId }, ver.user_token);
+  const shift = await j('/v1/driver/shifts', { client_op_id: crypto.randomUUID() }, drv.access_token);
+  const now = Date.now();
+  const pts = [[29.3375, 48.0186], [29.3402, 48.0250], [29.3431, 48.0322]].map(([lat, lng], i) => ({
+    recorded_at: new Date(now + i * 20_000).toISOString(), lat, lng, accuracy_m: 8, speed_mps: 10, battery_pct: 80 }));
+  await j('/v1/driver/locations', { points: pts }, drv.access_token);
+
+  await page.click('nav a:has-text("الخريطة الحية")');
+  await page.locator('.driver-row:has-text("سالم السائق")').waitFor();
+  await page.locator('.leaflet-interactive').first().waitFor();
+  await page.click('.driver-row:has-text("سالم السائق")');
+  await page.locator('text=مسار المناوبة').waitFor();
+  await page.locator('path.leaflet-interactive[stroke="#1d6fb8"]').waitFor();
+  const stats = await page.locator('aside .card div').last().textContent(); if (!(parseFloat(stats) > 1)) throw new Error(`track distance wrong: ${stats}`);
+  ok('السائق في المناوبة يظهر على الخريطة مع مساره');
+  await shot(page, '02b-map');
+  const w = { id: (await page.evaluate(async () => (await (await fetch('/api/v1/workers?status=active')).json()).data[0].id)) };
+  void shift;
+
+  // Create a task from the form
+  await page.click('nav a:has-text("المهام")');
+  await page.locator('h1:has-text("المهام")').waitFor();
   await page.click('button:has-text("مهمة جديدة")');
   await page.fill('input[name=ref]', 'WEB-001');
   await page.fill('input[name=address]', 'السالمية، قطعة 5، شارع 10');
