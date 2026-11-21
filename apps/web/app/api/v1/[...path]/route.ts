@@ -48,5 +48,6 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] 
 
 export const GET = handle;
 export const POST = handle;
+export const PUT = handle;
 export const PATCH = handle;
 export const DELETE = handle;

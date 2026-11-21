@@ -115,3 +115,22 @@ export const PAY_METHOD: Record<string, string> = {
   cash: 'نقدًا', bank_transfer: 'تحويل بنكي', knet: 'كي نت', card: 'بطاقة', cheque: 'شيك', cod_offset: 'خصم من مبالغ التحصيل', other: 'أخرى',
 };
 export const SKIP_REASON = (r: string) => r === 'no_contract' ? 'بلا عقد' : r === 'invalid_quantities' ? 'كميات غير صالحة' : r.startsWith('unpriced') ? 'وحدة بلا سعر في العقد' : r;
+
+/** Delivery pack (delivery@1) labels. */
+export const STAGE: Record<string, string> = {
+  at_pickup: 'وصل لنقطة الاستلام', picked_up: 'استلم الشحنة', at_dropoff: 'وصل للمستلم', returned_to_sender: 'أُعيدت للمرسل',
+};
+export const FAIL_REASON: Record<string, string> = {
+  recipient_absent: 'المستلم غير موجود', wrong_address: 'عنوان خاطئ', recipient_refused: 'رفض الاستلام', unreachable: 'تعذّر الاتصال',
+  damaged: 'شحنة تالفة', cod_not_paid: 'لم يدفع المبلغ', customer_canceled: 'ألغاه العميل', other: 'سبب آخر',
+};
+export const POD_METHOD: Record<string, string> = { pin: 'رمز المستلم', photo: 'صورة', signature: 'توقيع' };
+
+export interface KwAddress { area?: string; block?: string; street?: string; avenue?: string; house?: string; floor?: string; apartment?: string; notes?: string; lat?: number; lng?: number; phone?: string; name?: string }
+/** "السالمية، ق 5، ش 10، م 12" (same format as the API). */
+export function addressLine(a: KwAddress | null | undefined): string {
+  if (!a) return '—';
+  const parts = [a.area, a.block && `ق ${a.block}`, a.street && `ش ${a.street}`, a.avenue && `ج ${a.avenue}`, a.house && `م ${a.house}`,
+    a.floor && `دور ${a.floor}`, a.apartment && `شقة ${a.apartment}`].filter(Boolean);
+  return parts.length ? parts.join('، ') : '—';
+}

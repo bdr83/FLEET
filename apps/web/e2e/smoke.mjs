@@ -171,8 +171,11 @@ try {
   await page.locator('h1:has-text("المهام")').waitFor();
   await page.click('button:has-text("مهمة جديدة")');
   await page.fill('input[name=ref]', 'WEB-001');
-  await page.fill('input[name=address]', 'السالمية، قطعة 5، شارع 10');
+  await page.fill('input[name=area]', 'السالمية');
+  await page.fill('input[name=block]', '5');
+  await page.fill('input[name=street]', '10');
   await page.fill('input[name=recipient_name]', 'أحمد');
+  await page.fill('input[name=recipient_phone]', '50000001');
   await page.selectOption('select[name=customer_id]', { label: 'متجر الورد' });
   await shot(page, '03-new-task');
   await page.click('.modal button:has-text("إنشاء")');
@@ -198,6 +201,9 @@ try {
   await status('accepted');
   await status('in_progress');
   await j('/v1/driver/cod', { client_op_id: crypto.randomUUID(), task_id: taskId, amount: '10.000' }, drv.access_token);
+  // delivery with a recipient phone: the driver enters the recipient's PIN before completing
+  const pin = (await page.evaluate(async (id) => (await (await fetch(`/api/v1/delivery/tasks/${id}`)).json()).link.pin, taskId));
+  await j('/v1/driver/sync', { ops: [{ type: 'pod', method: 'pin', pin, client_op_id: crypto.randomUUID(), task_id: taskId, occurred_at: new Date().toISOString() }] }, drv.access_token);
   await status('completed');
 
   await page.goto(`${WEB}/tasks/${taskId}`);

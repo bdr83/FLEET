@@ -192,3 +192,20 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 - الفاتورة الصادرة لا تُعدَّل، والمهمة لا تظهر في فاتورتين.
 - المصروف المعتمد يُقيَّد تلقائيًا: مطالبة السائق دائنة لحسابه (2010)، ومصروف المكتب دائن للمصروفات المستحقة (2000).
 - المنصة لا تحتفظ بأموال (D5): مبالغ COD والدفعات سجلات لأموال تحتفظ بها الشركة المشتركة نفسها.
+
+## قطاع التوصيل delivery@1 (D1–D6)
+
+بيانات الطلب في `attributes` ويتحقق منها القطاع عند الإنشاء والتعديل: `dropoff` و`pickup` كعنوان كويتي `{area, block, street, avenue, house, floor, apartment, notes, lat, lng, phone}`، و`recipient {name, phone}`، و`cod_amount` و`delivery_fee` و`tip` (مبالغ بثلاث خانات)، و`external_order_id`، و`items_count`. يُبنى `address` من عنوان التسليم تلقائيًا. كل طلب توصيل يحصل على رمز مستلم من 4 أرقام ورابط تتبع صالح 14 يومًا.
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET/PUT | `/delivery/settings?legal_entity_id=` | tasks:read / org:write | رمز المستلم مطلوب، الحد الأقصى للطلبات المفتوحة، نطاق الإسناد، حداثة الموقع، SLA، العمولات، حد العهدة [تخمين للقيم الافتراضية] |
+| GET | `/delivery/tasks/:id` | tasks:read | الرمز ورابط التتبع (للمكتب فقط)، المراحل، إثبات التسليم، سبب الفشل |
+| POST | `/delivery/tasks/:id/pod/approve` و`/reject` | tasks:write | قبول أو رفض صورة/توقيع (الرفض يحتاج `reason`) |
+| POST | `/delivery/import` | tasks:write | `{legal_entity_id, customer_id?, branch_id?, orders[≤500]}`؛ `external_order_id` يمنع التكرار؛ يعيد created وduplicates وerrors لكل سطر |
+| POST | `/delivery/auto-assign` | tasks:assign | `{task_ids?}` يسند الطلبات الجاهزة لأقرب مندوب في وردية مفتوحة بموقع حديث، ضمن النطاق والحد الأقصى |
+| GET | `/delivery/exceptions` | tasks:read | متأخرة (الموعد أو SLA)، إثباتات بانتظار الموافقة، فاشلة لم تُرجع، رموز مقفلة، عهدة نقدية فوق الحد |
+| GET | `/delivery/earnings?from&to` | reports:read | تسليمات وفاشلة لكل مندوب × العمولة، وCOD المحصّل (تقرير فقط) |
+| GET | `/public/track/:token` | بلا دخول | صفحة المستلم: الحالة والمرحلة واسم الشركة والمنطقة، والرمز ما دام الطلب نشطًا، واسم المندوب الأول، وموقعه التقريبي فقط بعد الاستلام وأثناء الطريق. لا أرقام هواتف |
+
+في `/driver/sync` أنواع إضافية: `milestone {code: at_pickup|picked_up|at_dropoff|returned_to_sender, lat?, lng?}`، و`pod {method: pin|photo|signature, pin?, file_key?, recipient_name?}`. الرمز الخاطئ يُرفض `wrong_pin` ويُقفل بعد 5 محاولات `pin_locked`. إكمال طلب له جوال مستلم يحتاج إثباتًا `proof_required` (حسب الإعداد). الفشل يقبل `reason_code` من: recipient_absent, wrong_address, recipient_refused, unreachable, damaged, cod_not_paid, customer_canceled, other. `GET /driver/tasks?include=returns` يضيف الطلبات الفاشلة التي لم تُرجع بعد.

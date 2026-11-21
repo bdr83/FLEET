@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { dt, packLabel, TASK_STATUS } from '@/lib/format';
+import { addressLine, dt, KwAddress, money, packLabel, TASK_STATUS } from '@/lib/format';
+import { DeliveryPanel } from '@/components/delivery';
 import { can, useMe } from '@/components/me';
 import { AssignModal } from '@/components/assign';
 import { ErrorBox, Modal, StatusBadge, useAction, useLoad } from '@/components/ui';
@@ -20,7 +21,10 @@ const FLOW: Record<string, string[]> = {
 const ACTOR: Record<string, string> = { staff: 'الموظف', driver: 'السائق', system: 'النظام', customer: 'العميل' };
 const LABELS: Record<string, string> = {
   address: 'العنوان', recipient_name: 'المستلم', recipient_phone: 'جوال المستلم', notes: 'ملاحظات', title: 'العنوان', product: 'المنتج',
+  dropoff: 'عنوان التسليم', pickup: 'نقطة الاستلام', recipient: 'المستلم', cod_amount: 'التحصيل عند التسليم', delivery_fee: 'رسم التوصيل',
+  tip: 'إكرامية', external_order_id: 'رقم الطلب الخارجي', items_count: 'عدد القطع',
 };
+const MONEY = new Set(['cod_amount', 'delivery_fee', 'tip']);
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
@@ -63,7 +67,7 @@ export default function TaskDetail() {
             <dt>العميل</dt><dd>{t.customer_name ?? '—'}</dd>
             <dt>السائق</dt><dd>{t.worker_name ?? '—'}</dd>
             <dt>المركبة</dt><dd className="num">{t.plate_no ?? '—'}</dd>
-            {Object.entries(t.attributes ?? {}).map(([k, val]) => (
+            {Object.entries(t.attributes ?? {}).filter(([k]) => !(k === 'address' && t.attributes?.dropoff)).map(([k, val]) => (
               <Attr key={k} k={k} v={val} />
             ))}
             <dt>أُنشئت</dt><dd className="num">{dt(t.created_at)}</dd>
@@ -81,6 +85,7 @@ export default function TaskDetail() {
             ))}
           </ul>
         </section>
+        {t.sector_pack === 'delivery@1' && <DeliveryPanel taskId={t.id} status={t.status} onChange={() => void task.reload()} />}
       </div>
       {assigning && <AssignModal task={t} onClose={() => setAssigning(false)} onDone={() => { setAssigning(false); void task.reload(); }} />}
       {canceling && <CancelModal onClose={() => setCanceling(false)} onSubmit={async (reason) => { if (await simple('cancel', { reason })) setCanceling(false); }} busy={act.busy} />}
@@ -90,7 +95,11 @@ export default function TaskDetail() {
 
 function Attr({ k, v }: { k: string; v: unknown }) {
   if (v === null || v === undefined || v === '') return null;
-  const text = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  let text: string;
+  if (k === 'dropoff' || k === 'pickup') text = addressLine(v as KwAddress) + ((v as KwAddress).notes ? ` · ${(v as KwAddress).notes}` : '');
+  else if (k === 'recipient') text = [(v as { name?: string }).name, (v as { phone?: string }).phone].filter(Boolean).join(' · ') || '—';
+  else if (MONEY.has(k)) text = money(v as string);
+  else text = typeof v === 'object' ? JSON.stringify(v) : String(v);
   return <><dt>{LABELS[k] ?? k}</dt><dd>{text}</dd></>;
 }
 

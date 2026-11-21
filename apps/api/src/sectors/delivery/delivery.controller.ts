@@ -200,7 +200,7 @@ export class DeliveryController {
         await c.query(`UPDATE ops.task SET status = 'assigned', version = version + 1, updated_at = now() WHERE id = $1`, [t.id]);
         await c.query(
           `INSERT INTO ops.task_event (id, tenant_id, task_id, from_status, to_status, occurred_at, actor_id, actor_type, client_op_id, note)
-           VALUES ($1,$2,$3,'ready','assigned',now(),$4,'system',$5,'auto-assign')`,
+           VALUES ($1,$2,$3,'ready','assigned',now(),$4,'system',$5,'إسناد تلقائي')`,
           [randomUUID(), a.tenantId, t.id, a.userId, randomUUID()]);
         d.open_tasks++;
         assigned.push({ task_id: t.id, worker_id: d.worker_id, km: point ? Math.round(haversineKm(point, d) * 10) / 10 : null });

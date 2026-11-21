@@ -80,7 +80,9 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
   const [f, setF] = useState({
     legal_entity_id: me.legal_entities[0]?.id ?? '', sector_pack: 'delivery@1', ref: '', customer_id: '',
     from: `${today}T09:00`, to: `${today}T13:00`, address: '', recipient_name: '', recipient_phone: '', notes: '', draft: false,
+    area: '', block: '', street: '', avenue: '', house: '', cod_amount: '', delivery_fee: '',
   });
+  const delivery = f.sector_pack === 'delivery@1';
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setF({ ...f, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value });
   const { busy, error, run } = useAction();
@@ -89,10 +91,20 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
     e.preventDefault();
     void run(async () => {
       const attributes: Record<string, unknown> = {};
-      if (f.address) attributes.address = f.address;
-      if (f.recipient_name) attributes.recipient_name = f.recipient_name;
-      if (f.recipient_phone) attributes.recipient_phone = f.recipient_phone;
       if (f.notes) attributes.notes = f.notes;
+      if (delivery) {
+        // structured Kuwaiti address and recipient (validated by the delivery pack on the server)
+        const pick = (keys: (keyof typeof f)[]) => Object.fromEntries(keys.filter((k) => f[k]).map((k) => [k, String(f[k]).trim()]));
+        attributes.dropoff = pick(['area', 'block', 'street', 'avenue', 'house']);
+        attributes.recipient = { name: f.recipient_name || undefined, phone: f.recipient_phone || undefined };
+        if (f.cod_amount) attributes.cod_amount = f.cod_amount;
+        if (f.delivery_fee) attributes.delivery_fee = f.delivery_fee;
+        if (f.ref) attributes.external_order_id = f.ref;
+      } else {
+        if (f.address) attributes.address = f.address;
+        if (f.recipient_name) attributes.recipient_name = f.recipient_name;
+        if (f.recipient_phone) attributes.recipient_phone = f.recipient_phone;
+      }
       const t = await api<{ id: string }>('/tasks', {
         method: 'POST',
         body: {
@@ -121,7 +133,7 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
               {Object.entries(PACKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </select>
           </label>
-          <label className="field">المرجع (اختياري)<input name="ref" value={f.ref} onChange={set('ref')} maxLength={60} /></label>
+          <label className="field">{delivery ? 'رقم الطلب الخارجي (يمنع التكرار)' : 'المرجع (اختياري)'}<input name="ref" value={f.ref} onChange={set('ref')} maxLength={60} /></label>
           {can(me, 'customers:read') && (
             <label className="field">العميل (اختياري)
               <select name="customer_id" value={f.customer_id} onChange={set('customer_id')}>
@@ -133,11 +145,27 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
           <label className="field">من<input name="from" type="datetime-local" value={f.from} onChange={set('from')} /></label>
           <label className="field">إلى<input name="to" type="datetime-local" value={f.to} onChange={set('to')} /></label>
         </div>
-        <label className="field">العنوان<input name="address" value={f.address} onChange={set('address')} maxLength={300} /></label>
+        {delivery ? (
+          <fieldset className="addr">
+            <legend>عنوان التسليم</legend>
+            <div className="addr-grid">
+              <label className="field">المنطقة<input name="area" value={f.area} onChange={set('area')} maxLength={80} required /></label>
+              <label className="field">القطعة<input name="block" className="num" value={f.block} onChange={set('block')} maxLength={20} /></label>
+              <label className="field">الشارع<input name="street" value={f.street} onChange={set('street')} maxLength={80} /></label>
+              <label className="field">الجادة<input name="avenue" value={f.avenue} onChange={set('avenue')} maxLength={20} /></label>
+              <label className="field">المنزل<input name="house" className="num" value={f.house} onChange={set('house')} maxLength={20} /></label>
+            </div>
+          </fieldset>
+        ) : <label className="field">العنوان<input name="address" value={f.address} onChange={set('address')} maxLength={300} /></label>}
         <div className="form-2">
           <label className="field">اسم المستلم<input name="recipient_name" value={f.recipient_name} onChange={set('recipient_name')} maxLength={120} /></label>
-          <label className="field">جوال المستلم<input name="recipient_phone" className="num" inputMode="tel" value={f.recipient_phone} onChange={set('recipient_phone')} maxLength={20} /></label>
+          <label className="field">جوال المستلم<input name="recipient_phone" className="num" inputMode="tel" value={f.recipient_phone} onChange={set('recipient_phone')} maxLength={20} required={delivery} /></label>
+          {delivery && <>
+            <label className="field">مبلغ التحصيل عند التسليم (COD)<input name="cod_amount" className="num" inputMode="decimal" placeholder="0.000" value={f.cod_amount} onChange={set('cod_amount')} pattern="\d{1,9}(\.\d{1,3})?" /></label>
+            <label className="field">رسم التوصيل<input name="delivery_fee" className="num" inputMode="decimal" placeholder="0.000" value={f.delivery_fee} onChange={set('delivery_fee')} pattern="\d{1,9}(\.\d{1,3})?" /></label>
+          </>}
         </div>
+        {delivery && <p className="muted" style={{ margin: 0 }}>يُنشأ للمستلم رمز تسليم من 4 أرقام ورابط تتبع، ويطلب السائق الرمز عند التسليم.</p>}
         <label className="field">ملاحظات<textarea name="notes" rows={2} value={f.notes} onChange={set('notes')} maxLength={1000} /></label>
         <label className="row"><input type="checkbox" checked={f.draft} onChange={set('draft')} style={{ width: 'auto' }} />حفظ كمسودة (لا تظهر للتوزيع بعد)</label>
         <div className="row">
