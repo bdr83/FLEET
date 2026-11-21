@@ -10,6 +10,8 @@ export interface AuthContext extends TenantContext {
   roleCode: string;
   permissions: string[];
   branchIds: string[];
+  /** Set for customer-portal users: the one customer they act for. */
+  customerId: string | null;
 }
 
 export const PERM_KEY = 'required_permission';
@@ -33,7 +35,7 @@ export class AuthGuard implements CanActivate {
 
     const row = await this.db.withTenant({ tenantId: claims.tid, entityIds: [] }, async (c) => {
       const r = await c.query(
-        `SELECT m.id, r.code, r.permissions, m.scope_legal_entity_ids, m.scope_branch_ids, t.status
+        `SELECT m.id, r.code, r.permissions, m.scope_legal_entity_ids, m.scope_branch_ids, m.customer_id, t.status
            FROM org.membership m
            JOIN org.role r ON r.id = m.role_id
            JOIN org.tenant t ON t.id = m.tenant_id
@@ -54,6 +56,7 @@ export class AuthGuard implements CanActivate {
       permissions: row.permissions,
       entityIds: row.scope_legal_entity_ids ?? [],
       branchIds: row.scope_branch_ids ?? [],
+      customerId: row.customer_id ?? null,
     };
     req.auth = ctx;
     return true;

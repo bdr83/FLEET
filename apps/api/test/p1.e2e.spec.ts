@@ -90,9 +90,10 @@ import { auth, createApp, hasDb, joinAs, login, newPhone, onboard } from './help
     ];
     const tokens: Record<string, string> = {};
     beforeAll(async () => {
+      const customer = (await request(http).post('/v1/customers').set(auth(A.access_token)).send({ legal_entity_id: A.legal_entity_id, name: 'عميل' }).expect(201)).body.id;
       for (const role of ['dispatcher', 'accountant', 'driver', 'admin', 'customer']) {
         const phone = newPhone();
-        await request(http).post('/v1/members').set(auth(A.access_token)).send({ phone, role_code: role }).expect(201);
+        await request(http).post('/v1/members').set(auth(A.access_token)).send({ phone, role_code: role, ...(role === 'customer' ? { customer_id: customer } : {}) }).expect(201);
         tokens[role] = (await joinAs(app, A.tenant.id, phone)).access_token;
       }
     });

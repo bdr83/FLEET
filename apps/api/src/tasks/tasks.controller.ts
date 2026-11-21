@@ -10,12 +10,13 @@ import { canStaff, EDITABLE, STAFF_FLOW, StaffAction, TASK_STATUSES } from './ta
 
 const COLUMNS = `t.id, t.ref, t.legal_entity_id, t.branch_id, t.sector_pack, t.status,
   lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
-  t.customer_id, t.version, t.attributes, t.created_at, t.updated_at,
+  t.customer_id, cu.name AS customer_name, t.site_id, t.contract_id, t.version, t.attributes, t.created_at, t.updated_at,
   asg.worker_id, w.display_name AS worker_name, asg.asset_id, ast.plate_no`;
 const FROM = `ops.task t
   LEFT JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active
   LEFT JOIN workforce.worker w ON w.id = asg.worker_id
-  LEFT JOIN fleet.asset ast ON ast.id = asg.asset_id`;
+  LEFT JOIN fleet.asset ast ON ast.id = asg.asset_id
+  LEFT JOIN crm.customer cu ON cu.id = t.customer_id`;
 /** Default booking length when a task has no service window. [تخمين] tune per sector. */
 const DEFAULT_ASSIGN_HOURS = 4;
 
@@ -88,24 +89,9 @@ export class TasksController {
     const attrs = v.obj(b?.attributes, 'attributes');
     const win = parseWindow(b ?? {});
     const status = b?.draft === true ? 'draft' : 'ready';
-    return this.db.withTenant(a, async (c) => {
-      // The legal entity must belong to the caller's tenant and scope (RLS hides others).
-      if (!(await c.query('SELECT 1 FROM org.legal_entity WHERE id = $1', [le])).rowCount) throw new BadRequestException('unknown legal_entity_id');
-      if (ref) {
-        const prior = (await c.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE t.ref = $1`, [ref])).rows[0];
-        if (prior) return prior; // same order sent twice: return the existing task
-      }
-      const id = randomUUID();
-      try {
-        await c.query(
-          `INSERT INTO ops.task (id, tenant_id, legal_entity_id, branch_id, sector_pack, status, service_window, ref, attributes, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE tstzrange($7,$8) END,$9,COALESCE($10::jsonb,'{}'),$11)`,
-          [id, a.tenantId, le, branch, pack, status, win?.from ?? null, win?.to ?? null, ref, attrs && JSON.stringify(attrs), a.userId]);
-      } catch (e) { return pgToHttp(e); }
-      const row = (await c.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE t.id = $1`, [id])).rows[0];
-      await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: 'task.created', targetType: 'task', targetId: id, after: row });
-      return row;
-    });
+    const customer = v.uuid(b?.customer_id, 'customer_id');
+    const site = v.uuid(b?.site_id, 'site_id');
+    return this.db.withTenant(a, (c) => createTask(c, a, { le: le!, pack: pack!, branch, ref, attrs, win, status, customer, site }));
   }
 
   @Patch(':id')
@@ -239,3 +225,50 @@ export class TasksController {
     return pgToHttp(e);
   }
 }
+
+export interface NewTask {
+  le: string; pack: string; branch: string | null; ref: string | null; attrs: Record<string, unknown> | null;
+  win: { from: string; to: string } | null | undefined; status: 'draft' | 'ready'; customer: string | null; site: string | null;
+}
+
+/**
+ * Creates a task inside the caller's transaction. Shared by staff (/tasks) and the customer portal.
+ * Links the customer's active contract for the task date, so it is priced by the prices agreed at the time.
+ */
+export async function createTask(c: PoolClient, a: AuthContext, t: NewTask) {
+  // The legal entity must belong to the caller's tenant and scope (RLS hides others).
+  if (!(await c.query('SELECT 1 FROM org.legal_entity WHERE id = $1', [t.le])).rowCount) throw new BadRequestException('unknown legal_entity_id');
+  if (t.ref) {
+    const prior = (await c.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE t.ref = $1`, [t.ref])).rows[0];
+    if (prior) return prior; // same order sent twice: return the existing task
+  }
+  let contract: string | null = null;
+  if (t.customer) {
+    const cu = (await c.query('SELECT legal_entity_id, status FROM crm.customer WHERE id = $1', [t.customer])).rows[0];
+    if (!cu) throw new BadRequestException('unknown customer_id');
+    if (cu.legal_entity_id !== t.le) throw new BadRequestException('customer belongs to another legal entity');
+    if (cu.status !== 'active') throw new ConflictException(`customer is ${cu.status}`);
+    contract = (await c.query(
+      `SELECT k.id FROM crm.contract k JOIN org.legal_entity le ON le.id = k.legal_entity_id
+        WHERE k.customer_id = $1 AND k.status = 'active'
+          AND k.starts_on <= ($2::timestamptz AT TIME ZONE le.timezone)::date
+          AND (k.ends_on IS NULL OR k.ends_on >= ($2::timestamptz AT TIME ZONE le.timezone)::date)`,
+      [t.customer, t.win?.from ?? new Date().toISOString()])).rows[0]?.id ?? null;
+  }
+  if (t.site) {
+    if (!t.customer) throw new BadRequestException('site_id needs customer_id');
+    if (!(await c.query('SELECT 1 FROM crm.site WHERE id = $1 AND customer_id = $2 AND active', [t.site, t.customer])).rowCount) throw new BadRequestException('unknown site_id for this customer');
+  }
+  const id = randomUUID();
+  try {
+    await c.query(
+      `INSERT INTO ops.task (id, tenant_id, legal_entity_id, branch_id, sector_pack, status, service_window, ref, attributes, created_by, customer_id, site_id, contract_id)
+       VALUES ($1,$2,$3,$4,$5,$6,CASE WHEN $7::timestamptz IS NULL THEN NULL ELSE tstzrange($7,$8) END,$9,COALESCE($10::jsonb,'{}'),$11,$12,$13,$14)`,
+      [id, a.tenantId, t.le, t.branch, t.pack, t.status, t.win?.from ?? null, t.win?.to ?? null, t.ref, t.attrs && JSON.stringify(t.attrs), a.userId, t.customer, t.site, contract]);
+  } catch (e) { return pgToHttp(e); }
+  const row = (await c.query(`SELECT ${COLUMNS} FROM ${FROM} WHERE t.id = $1`, [id])).rows[0];
+  await audit(c, { tenantId: a.tenantId, actorId: a.userId, actorType: a.customerId ? 'customer' : 'user', action: 'task.created', targetType: 'task', targetId: id, after: row });
+  return row;
+}
+
+export { parseWindow };

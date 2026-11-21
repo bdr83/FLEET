@@ -15,10 +15,11 @@ interface MemberInput {
   scope_legal_entity_ids?: string[] | null;
   scope_branch_ids?: string[] | null;
   valid_until?: string | null;
+  customer_id?: string;
 }
 
 const SELECT = `SELECT m.id, m.user_id, u.phone, u.display_name, r.code AS role, m.scope_legal_entity_ids,
-                       m.scope_branch_ids, m.valid_until, m.revoked_at, m.created_at
+                       m.scope_branch_ids, m.customer_id, m.valid_until, m.revoked_at, m.created_at
                   FROM org.membership m JOIN org.app_user u ON u.id = m.user_id JOIN org.role r ON r.id = m.role_id`;
 
 @Controller('v1/members')
@@ -40,7 +41,18 @@ export class MembersController {
     if (!phone) throw new BadRequestException('invalid phone');
     return this.db.withTenant(a, async (c) => {
       const role = await this.resolveRole(c, a, body.role_code);
-      const scope = await this.validateScope(c, body);
+      let scope = await this.validateScope(c, body);
+      // A customer-portal user is tied to one customer and sees only that customer's legal entity.
+      let customerId: string | null = null;
+      if (role.code === 'customer') {
+        if (!isUuid(body.customer_id)) throw new BadRequestException('customer_id required for the customer role');
+        const cu = (await c.query('SELECT legal_entity_id FROM crm.customer WHERE id = $1', [body.customer_id])).rows[0];
+        if (!cu) throw new BadRequestException('unknown customer_id');
+        customerId = body.customer_id;
+        scope = { entities: [cu.legal_entity_id], branches: null };
+      } else if (body.customer_id !== undefined) {
+        throw new BadRequestException('customer_id is only for the customer role');
+      }
       const u = await c.query(
         `INSERT INTO org.app_user (id, phone, display_name) VALUES ($1,$2,$3)
          ON CONFLICT (phone) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name) RETURNING id`,
@@ -48,9 +60,9 @@ export class MembersController {
       const id = randomUUID();
       try {
         await c.query(
-          `INSERT INTO org.membership (id, tenant_id, user_id, role_id, scope_legal_entity_ids, scope_branch_ids, valid_until)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [id, a.tenantId, u.rows[0].id, role.id, scope.entities, scope.branches, body.valid_until ?? null]);
+          `INSERT INTO org.membership (id, tenant_id, user_id, role_id, scope_legal_entity_ids, scope_branch_ids, valid_until, customer_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [id, a.tenantId, u.rows[0].id, role.id, scope.entities, scope.branches, body.valid_until ?? null, customerId]);
       } catch (e) {
         if ((e as { code?: string }).code === '23505') throw new BadRequestException('already a member');
         throw e;
@@ -70,6 +82,8 @@ export class MembersController {
       if (before.role === 'owner' && a.roleCode !== 'owner') throw new ForbiddenException('only an owner can change an owner');
       const role = body.role_code ? await this.resolveRole(c, a, body.role_code) : null;
       if (before.role === 'owner' && role && role.code !== 'owner') await this.assertAnotherOwner(c, id);
+      if (role && (role.code === 'customer') !== (before.role === 'customer')) throw new BadRequestException('customer portal access is a separate membership: revoke and add again');
+      if (before.role === 'customer' && ('scope_legal_entity_ids' in body || 'scope_branch_ids' in body)) throw new BadRequestException('a customer user scope follows the customer');
       const scope = await this.validateScope(c, body);
       await c.query(
         `UPDATE org.membership SET

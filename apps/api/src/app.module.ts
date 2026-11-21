@@ -16,10 +16,13 @@ import { DriverController } from './driver/driver.controller';
 import { DispatchController } from './dispatch/dispatch.controller';
 import { TrackingController } from './tracking/tracking.controller';
 import { ReportsController } from './reports/reports.controller';
+import { CustomersController } from './crm/customers.controller';
+import { ContractsController } from './crm/contracts.controller';
+import { PortalController } from './crm/portal.controller';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, TasksController],
   providers: [
     DbService,
     OtpService,

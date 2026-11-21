@@ -110,3 +110,31 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 - أقصى مدة للتقرير 93 يومًا [تخمين]. المنطقة الزمنية الافتراضية Asia/Kuwait.
 - المسافة تتجاهل النقاط التي دقتها أسوأ من 100 متر حتى لا يضخّم تذبذب GPS الكيلومترات [تخمين].
 - ملف CSV يبدأ بـ BOM ليفتح بالعربية في Excel، والخلايا التي تبدأ بـ = أو + أو - أو @ تُسبق بعلامة ' لمنع حقن الصيغ.
+
+## العملاء والعقود وبوابة العميل (P6)
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET | `/customers?q=&status=` | customers:read | بحث بالاسم أو الهاتف أو الرقم المرجعي |
+| GET | `/customers/:id` | customers:read | العميل مع مواقعه وعقده الفعّال |
+| POST | `/customers` | customers:write | `{legal_entity_id, name, kind?, ref?, phone?, email?, cr_number?, payment_terms_days?, credit_limit?}` |
+| PATCH | `/customers/:id` | customers:write | منها `status`: active أو on_hold (يوقف إنشاء مهام له) أو closed |
+| POST | `/customers/:id/sites` | customers:write | `{name, address?, lat?, lng?, contact_name?, contact_phone?}` |
+| PATCH | `/sites/:id` | customers:write | تعديل أو إيقاف موقع |
+| GET | `/contracts?customer_id=&status=` | customers:read | |
+| GET | `/contracts/:id` | customers:read | العقد مع قائمة الأسعار |
+| POST | `/contracts` | customers:write | `{customer_id, starts_on, ends_on?, code?, payment_terms_days?, rates:[{unit, price, sector_pack?, included_qty?, min_charge?}]}` |
+| POST/DELETE | `/contracts/:id/rates` | customers:write | في المسودة فقط |
+| POST | `/contracts/:id/activate\|suspend\|resume\|end` | customers:write | |
+| POST | `/contracts/:id/quote` | customers:read | `{sector_pack, quantities:{task:1, km:12}}` → البنود والإجمالي |
+| GET | `/portal/me` | portal:own | بيانات العميل ومواقعه |
+| GET | `/portal/tasks`, `/portal/tasks/:id` | portal:own | طلبات العميل فقط، والسائق يظهر بعد قبوله |
+| POST | `/portal/tasks` | portal:own | طلب جديد يصل مسودة ليراجعه المشغّل |
+| POST | `/portal/tasks/:id/cancel` | portal:own | قبل الإسناد فقط |
+
+قواعد:
+- وحدات التسعير: task, km, hour, trip, m3, ton, day, month. السعر الخاص بنوع المهمة يسبق السعر العام.
+- الحساب بالفلس (3 منازل عشرية) دون كسور عائمة. الكمية المشمولة مجانية، والحد الأدنى يطبَّق على الكميات الصغيرة (مثل حمولة خرسانة صغيرة).
+- عقد فعّال واحد للعميل في أي يوم. أسعار العقد الفعّال وشروط دفعه مجمّدة؛ لتغييرها يُنهى العقد ويُفعَّل عقد جديد، فتبقى كل فاتورة مرتبطة بالأسعار المتفق عليها وقتها.
+- المهمة المرتبطة بعميل تأخذ عقده الفعّال في تاريخ تنفيذها (بتوقيت شركته القانونية).
+- مستخدم بوابة العميل عضوية بدور customer مرتبطة بعميل واحد (`customer_id` عند إضافة العضو).
