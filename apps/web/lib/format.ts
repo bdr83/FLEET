@@ -94,3 +94,16 @@ export const CONTRACT_STATUS: Record<string, { label: string; tone: string }> = 
 export const UNIT: Record<string, string> = {
   task: 'مهمة', km: 'كيلومتر', hour: 'ساعة', trip: 'رحلة', m3: 'متر مكعب', ton: 'طن', day: 'يوم', month: 'شهر',
 };
+
+export const WO_KIND: Record<string, string> = { preventive: 'وقائية', corrective: 'إصلاح', inspection: 'فحص', accident: 'حادث' };
+export const WO_STATUS: Record<string, { label: string; tone: string }> = {
+  open: tone('مفتوح', 'info'), in_progress: tone('قيد العمل', 'warning'), done: tone('منجز', 'success'), canceled: tone('ملغى'),
+};
+export const LINE_KIND: Record<string, string> = { part: 'قطعة', labor: 'أجرة عمل', other: 'أخرى' };
+export const EXPENSE_CAT: Record<string, string> = {
+  fuel: 'وقود', maintenance: 'صيانة', tires: 'إطارات', insurance: 'تأمين', registration: 'تسجيل', fines: 'مخالفات',
+  tolls: 'رسوم طرق', parking: 'مواقف', washing: 'غسيل', other: 'أخرى',
+};
+export const EXPENSE_STATUS: Record<string, { label: string; tone: string }> = {
+  submitted: tone('بانتظار الاعتماد', 'warning'), approved: tone('معتمد', 'success'), rejected: tone('مرفوض', 'danger'),
+};

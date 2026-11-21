@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { TASK_STATUS } from '@/lib/format';
 
 /** Loads data and exposes reload; keeps the last data while reloading so screens do not flash. */
@@ -101,4 +101,17 @@ export function useForm<T extends Record<string, string | boolean>>(init: T) {
 /** Drops empty strings so optional fields are simply left out of the request. */
 export function clean<T extends Record<string, unknown>>(o: T): Partial<T> {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v !== undefined)) as Partial<T>;
+}
+
+export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, string][]; value: T; onChange: (t: T) => void }) {
+  return (
+    <div className="tabs" role="tablist">
+      {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={value === k} className={value === k ? 'on' : ''} onClick={() => onChange(k)}>{l}</button>)}
+    </div>
+  );
+}
+
+/** Vehicles for a select box (needs fleet:read). */
+export function useAssets() {
+  return useLoad(() => api<{ data: { id: string; plate_no: string | null; asset_type: string; status: string; legal_entity_id: string; odometer_km: number | null }[] }>('/assets').then((r) => r.data));
 }

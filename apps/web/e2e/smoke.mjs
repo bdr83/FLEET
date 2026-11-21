@@ -134,6 +134,38 @@ try {
   ok('عقد بسعر توصيل، تفعيله يجمّد الأسعار، وحاسبة السعر صحيحة');
   await shot(page, '02c-contract');
 
+  // Maintenance: a 7-day plan is due soon → open a work order from it, add a cost line, complete → expense posted
+  await page.click('nav a:has-text("الصيانة")');
+  await page.click('button[role=tab]:has-text("خطط الصيانة")');
+  await page.selectOption('select[name=asset_id]', { label: '12-34567' });
+  await page.fill('input[name=name]', 'فحص أسبوعي');
+  await page.fill('input[name=interval_days]', '7');
+  await page.click('button:has-text("إضافة خطة")');
+  await page.locator('td:has-text("فحص أسبوعي")').waitFor();
+  await page.click('button[role=tab]:has-text("المستحقة")');
+  await page.locator('tr:has-text("فحص أسبوعي") button:has-text("فتح أمر عمل")').click();
+  await page.click('.modal button:has-text("فتح")');
+  await page.waitForURL(/\/maintenance\/[0-9a-f-]{36}$/);
+  await page.fill('input[name=description]', 'فلتر زيت');
+  await page.fill('input[name=qty]', '2');
+  await page.fill('input[name=unit_cost]', '3.250');
+  await page.click('button:has-text("إضافة بند")');
+  await page.locator('td strong:has-text("6.500 KWD")').waitFor();
+  await page.click('button:has-text("تم الإنجاز")');
+  await page.locator('.badge:has-text("منجز")').waitFor();
+  ok('خطة صيانة مستحقة ← أمر عمل ببنود ← إنجاز');
+  await shot(page, '02d-work-order');
+
+  // Expenses: the work order cost is there; a driver's claim from the app waits for approval
+  await j('/v1/driver/expenses', { client_op_id: crypto.randomUUID(), category: 'fuel', amount: '4.750', liters: 30 }, drv.access_token);
+  await page.click('nav a:has-text("المصروفات")');
+  await page.locator('tr:has-text("صيانة"):has-text("6.500 KWD")').waitFor();
+  const claim = page.locator('tr:has-text("4.750 KWD")');
+  await claim.locator('.badge:has-text("بانتظار الاعتماد")').waitFor();
+  await claim.locator('button:has-text("اعتماد")').click();
+  await claim.locator('.badge:has-text("معتمد")').waitFor();
+  ok('مصروف الصيانة مسجّل، ومطالبة السائق تُعتمد من المكتب');
+
   // Create a task from the form
   await page.click('nav a:has-text("المهام")');
   await page.locator('h1:has-text("المهام")').waitFor();
