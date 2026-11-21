@@ -1,0 +1,205 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
+import 'api.dart';
+import 'config.dart';
+import 'models.dart';
+import 'queue.dart';
+import 'tracker.dart';
+
+const _uuid = Uuid();
+String newOpId() => _uuid.v4();
+String nowIso() => DateTime.now().toUtc().toIso8601String();
+
+/// Everything the screens read: session, worker, shift, tasks and the offline queue.
+class AppState extends ChangeNotifier {
+  AppState({Api? api, QueueStore? queueStore, QueueStore? pointStore})
+      : api = api ?? Api(),
+        _queueStore = queueStore ?? PrefsQueueStore('queue_v1'),
+        _pointStore = pointStore ?? PrefsQueueStore('points_v1');
+  final Api api;
+  final QueueStore _queueStore, _pointStore;
+  late final OpQueue queue = OpQueue(api, _queueStore)..onChange = notifyListeners;
+  late final Tracker tracker = Tracker(api, _pointStore);
+
+  bool ready = false, offline = false, loading = false;
+  Worker? worker;
+  Shift? shift;
+  List<DriverTask> tasks = [];
+  String? error;
+  Timer? _timer;
+
+  bool get signedIn => api.signedIn;
+
+  Future<void> boot() async {
+    api.onSignedOut = () { worker = null; shift = null; tasks = []; notifyListeners(); };
+    await queue.init();
+    await tracker.init();
+    if (await api.restore()) await refresh();
+    ready = true;
+    notifyListeners();
+    _timer = Timer.periodic(flushEvery, (_) => sync());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  // ---- login ----
+  Future<({String? devCode})> requestCode(String phone) async {
+    final r = await api.postPublic('/v1/auth/otp/request', {'phone': phone});
+    return (devCode: r?['dev_code'] as String?);
+  }
+
+  /// Returns the companies the number belongs to; signs in directly when there is one.
+  Future<List<Map<String, dynamic>>> verifyCode(String phone, String code) async {
+    final r = await api.postPublic('/v1/auth/otp/verify', {'phone': phone, 'code': code});
+    _userToken = r['user_token'];
+    final ms = (r['memberships'] as List).map((m) => Map<String, dynamic>.from(m)).toList();
+    final drivers = ms.where((m) => m['role_code'] == 'driver').toList();
+    final pick = drivers.length == 1 ? drivers : (ms.length == 1 ? ms : null);
+    if (pick != null) await chooseCompany(pick.first['tenant_id']);
+    return ms;
+  }
+
+  String? _userToken;
+  Future<void> chooseCompany(String tenantId) async {
+    final r = await api.postPublic('/v1/auth/token', {'tenant_id': tenantId}, bearer: _userToken);
+    await api.setSession(r['access_token'], r['refresh_token']);
+    _userToken = null;
+    await refresh();
+  }
+
+  Future<void> signOut() async {
+    await sync();
+    await tracker.stop();
+    await api.signOut();
+    worker = null; shift = null; tasks = [];
+    notifyListeners();
+  }
+
+  // ---- data ----
+  Future<void> refresh() async {
+    loading = true;
+    notifyListeners();
+    try {
+      await queue.flush();
+      final me = await api.get('/v1/driver/me');
+      worker = Worker.fromJson(me['worker']);
+      shift = me['open_shift'] == null ? null : Shift.fromJson(me['open_shift']);
+      final t = await api.get('/v1/driver/tasks?include=returns');
+      tasks = (t['data'] as List).map((j) => DriverTask.fromJson(j)).toList();
+      offline = false;
+      error = null;
+      if (shift != null && !tracker.running) error = await tracker.start();
+      if (shift == null && tracker.running) await tracker.stop();
+    } on ApiException catch (e) {
+      offline = e.isNetwork;
+      if (!e.isNetwork) error = e.message;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Background tick: send queued actions and GPS points.
+  Future<void> sync() async {
+    if (!signedIn) return;
+    final before = queue.pending;
+    await queue.flush();
+    await tracker.flush();
+    offline = queue.pending > 0 && queue.pending == before;
+    notifyListeners();
+  }
+
+  // ---- shift ----
+  Future<List<Vehicle>> vehicles() async =>
+      ((await api.get('/v1/driver/assets'))['data'] as List).map((j) => Vehicle.fromJson(j)).toList();
+
+  Future<void> startShift({String? assetId, int? odometerKm}) async {
+    final r = await api.post('/v1/driver/shifts', {
+      'client_op_id': newOpId(),
+      'asset_id': ?assetId,
+      'odometer_km': ?odometerKm,
+      'started_at': nowIso(),
+    });
+    shift = Shift.fromJson(r);
+    error = await tracker.start();
+    notifyListeners();
+  }
+
+  Future<void> endShift({int? odometerKm}) async {
+    final s = shift;
+    if (s == null) return;
+    await tracker.flush();
+    await api.post('/v1/driver/shifts/${s.id}/end', {'odometer_km': ?odometerKm, 'ended_at': nowIso()});
+    await tracker.stop();
+    shift = null;
+    notifyListeners();
+  }
+
+  // ---- task actions (queued, applied locally at once) ----
+  DriverTask? task(String id) => tasks.where((t) => t.id == id).firstOrNull;
+
+  void _local(String id, DriverTask Function(DriverTask) f) {
+    tasks = [for (final t in tasks) t.id == id ? f(t) : t];
+    tasks.removeWhere((t) => (t.status == 'completed') || (t.status == 'failed' && t.stage == 'returned_to_sender'));
+    notifyListeners();
+  }
+
+  Future<OpResult?> _syncOp(String taskId, Map<String, dynamic> op, {bool wait = false}) async {
+    final id = newOpId();
+    await queue.add({'kind': 'sync', 'task_id': taskId, 'op': {'client_op_id': id, 'task_id': taskId, 'occurred_at': nowIso(), ...op}});
+    if (!wait) {
+      unawaited(queue.flush());
+      return null;
+    }
+    await queue.flush();
+    return queue.resultOf(id);
+  }
+
+  Future<void> setStatus(String taskId, String status, {String? reasonCode, String? note}) async {
+    _local(taskId, (t) => t.copyWith(status: status));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': status, 'reason_code': ?reasonCode, 'note': ?note});
+  }
+
+  Future<void> milestone(String taskId, String code) async {
+    final p = await tracker.current();
+    _local(taskId, (t) => t.copyWith(stage: code));
+    await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
+  }
+
+  /// Checks the recipient's PIN with the server when online (so a wrong PIN is known at once).
+  /// Offline it is queued and checked when the phone reconnects. Returns null when accepted or queued.
+  Future<String?> provePin(String taskId, String pin) async {
+    final r = await _syncOp(taskId, {'type': 'pod', 'method': 'pin', 'pin': pin}, wait: true);
+    if (r != null && !r.ok) {
+      queue.problems.removeWhere((p) => p.taskId == taskId && p.reason == r.reason);
+      notifyListeners();
+      return rejectReasons[r.reason] ?? r.reason ?? 'رُفض الرمز';
+    }
+    _local(taskId, (t) => t.copyWith(hasProof: true));
+    return null;
+  }
+
+  Future<void> provePhoto(String taskId, Uint8List jpeg, {String? recipientName}) async {
+    await queue.add({
+      'kind': 'photo', 'task_id': taskId, 'upload_op': newOpId(), 'pod_op': newOpId(),
+      'b64': base64Encode(jpeg), 'content_type': 'image/jpeg', 'recipient_name': recipientName, 'occurred_at': nowIso(),
+    });
+    _local(taskId, (t) => t.copyWith(hasProof: true));
+    unawaited(queue.flush());
+  }
+
+  Future<void> collectCod(String taskId, int fils) async {
+    await queue.add({'kind': 'cod', 'task_id': taskId, 'body': {'client_op_id': newOpId(), 'task_id': taskId, 'amount': filsToMoney(fils), 'collected_at': nowIso()}});
+  }
+
+  void dismissProblems() {
+    queue.problems.clear();
+    notifyListeners();
+  }
+}

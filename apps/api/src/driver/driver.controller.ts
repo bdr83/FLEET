@@ -236,7 +236,7 @@ export class DriverController {
       const w = await this.me(c, a, { active: false });
       return {
         data: (await c.query(
-          `SELECT t.id, t.status, t.sector_pack, lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
+          `SELECT t.id, t.ref, t.status, t.sector_pack, lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
                   t.attributes, t.version, asg.asset_id,
                   (SELECT m.code FROM ops.task_milestone m WHERE m.task_id = t.id ORDER BY m.occurred_at DESC LIMIT 1) AS stage,
                   EXISTS (SELECT 1 FROM ops.delivery_pod p WHERE p.task_id = t.id) AS has_proof
