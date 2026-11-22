@@ -57,6 +57,10 @@ crontab -e   # يوميًا 02:15 UTC
 
 [تحقق محلي] جُرّب مع nginx 1.27 في حاوية: الموقع الآخر يبقى يعمل، والمنصة تعمل بـ HTTPS عبره، والتكرار لا يضاعف الكتل، وإعداد خاطئ يُرجَع تلقائيًا.
 
+## النشر عبر runner على الخادم (بلا مفتاح SSH)
+
+بديل أسهل من مفتاح SSH: `deploy/install-runner.sh` يثبّت GitHub Actions runner على الخادم كخدمة باسم `<hostname>-fleet` ووسم `fleet-pilot`، ويطلب فقط رمز التسجيل من صفحة Settings → Actions → Runners → New self-hosted runner. بعدها workflow ‏**deploy-runner** ينشر محليًا على الخادم بالإعدادات من متغير `SERVER_ENV`. [تخمين] الـ runner يعمل بصلاحية root للتجربة لأنه يعدّل nginx المشترك ويصدر الشهادات؛ المستودع خاص ولا يشغّله إلا هذا الـ workflow.
+
 ## تطبيق السائق
 
 في إعدادات المستودع على GitHub (Settings → Secrets and variables → Actions → Variables) أضف `DRIVER_API_URL=https://api.<النطاق>`، ثم شغّل workflow ‏driver-app يدويًا لبناء APK يتصل بالخادم.
