@@ -193,6 +193,13 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude, ...extra});
   }
 
+  /// Cold chain: a temperature reading on the route, typed from the truck's display (queued offline like any op).
+  Future<String?> tempReading(String routeTaskId, double celsius) async {
+    final r = await _syncOp(routeTaskId, {'type': 'temp', 'reading_c': celsius}, wait: true);
+    if (r != null && !r.ok) return _refused(routeTaskId, r);
+    return null;
+  }
+
   /// Driver supply: checking in accepts the day-shift if needed, records the check-in with the position (the office sees
   /// how far from the site it was) and starts the shift. Queued in order, so it works offline too.
   Future<void> checkIn(String taskId) async {
@@ -248,8 +255,8 @@ class AppState extends ChangeNotifier {
   }
 
   /// A stop: delivered and returned quantities, the cash for a cash customer, who received. Online the server answers at once.
-  Future<String?> stopProof(String taskId, {required Map<String, double> delivered, Map<String, double> returned = const {}, String? cash, String? receivedBy}) async {
-    final r = await _syncOp(taskId, {'type': 'stop', 'delivered': delivered, if (returned.isNotEmpty) 'returned': returned, 'cash_collected': ?cash, 'received_by': ?receivedBy}, wait: true);
+  Future<String?> stopProof(String taskId, {required Map<String, double> delivered, Map<String, double> returned = const {}, Map<String, double> damaged = const {}, String? cash, String? receivedBy}) async {
+    final r = await _syncOp(taskId, {'type': 'stop', 'delivered': delivered, if (returned.isNotEmpty) 'returned': returned, if (damaged.isNotEmpty) 'damaged': damaged, 'cash_collected': ?cash, 'received_by': ?receivedBy}, wait: true);
     if (r != null && !r.ok) return _refused(taskId, r);
     _local(taskId, (x) => x.copyWith(status: 'completed'));
     return null;

@@ -181,6 +181,27 @@ void main() {
     });
   });
 
+  group('cold chain', () {
+    test('cold route range and stop expiry', () {
+      final r = task('accepted', pack: 'distribution@1', attrs: {'kind': 'route', 'temp_class': 'frozen', 'temp_min': -25, 'temp_max': -18});
+      expect((r.isCold, r.tempMin, r.tempMax), (true, -25.0, -18.0));
+      expect(task('accepted', pack: 'distribution@1', attrs: {'kind': 'route', 'temp_class': 'ambient'}).isCold, false);
+      expect(task('accepted', pack: 'distribution@1', attrs: {'kind': 'route'}).isCold, false);
+      final s = task('accepted', pack: 'distribution@1', attrs: {'kind': 'stop', 'items': [{'sku': 'MLK', 'name': 'حليب', 'qty': 1, 'price': '0.350', 'expiry': '2026-11-23'}]});
+      expect(s.distItems.single.expiry, '2026-11-23');
+      expect(distFailReasons.keys, containsAll(['temp_out_of_range', 'expired', 'late_window']));
+    });
+    test('typed temperature', () {
+      expect(parseCelsius('4.5'), 4.5);
+      expect(parseCelsius('-18'), -18.0);
+      expect(parseCelsius('٣٫٥'), 3.5);
+      expect(parseCelsius('−20,5'), -20.5);
+      expect(parseCelsius('99'), isNull);
+      expect(parseCelsius('4.55'), isNull);
+      expect(parseCelsius(''), isNull);
+    });
+  });
+
   group('freight trips', () {
     DriverTask trip(String status, {String? stage}) => DriverTask(
         id: 'f', status: status, sectorPack: 'freight@1', version: 1, stage: stage,

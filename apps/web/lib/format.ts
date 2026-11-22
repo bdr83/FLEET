@@ -51,6 +51,7 @@ export const ROLE: Record<string, string> = {
 export const PACK_INFO: { code: string; sector: number; label: string; hint: string }[] = [
   { code: 'delivery', sector: 1, label: 'توصيل الطلبات والمندوبين', hint: 'طلبات توصيل، تتبع للمستلم، COD، عمولات' },
   { code: 'freight', sector: 2, label: 'الشحن والنقل البري', hint: 'أوامر نقل، شاحنات ومقطورات، ناقلون من الباطن، ربح الرحلة' },
+  { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد', hint: 'مسارات مبردة ومجمدة، نوافذ تسليم، قراءات حرارة، تالف وصلاحية' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
@@ -224,3 +225,7 @@ Object.assign(STAGE, { loaded: STAGE.loaded ?? 'تم التحميل', unloaded: 
 export const BILL_UNIT: Record<string, string> = { trip: 'بالرحلة', km: 'بالكيلومتر', ton: 'بالطن' };
 export const FREIGHT_MODE: Record<string, string> = { ftl: 'شاحنة كاملة', ltl: 'حمولة جزئية' };
 export const kg = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 1 })} كغ`);
+
+/** Cold chain (coldchain pack) labels. */
+export const TEMP_CLASS: Record<string, string> = { ambient: 'عادي', chilled: 'مبرد', frozen: 'مجمد' };
+Object.assign(DIST_FAIL, { temp_out_of_range: 'الحرارة خارج النطاق', expired: 'منتهي الصلاحية', late_window: 'خارج نافذة التسليم' });

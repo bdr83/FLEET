@@ -15,11 +15,32 @@ export type Stage = (typeof STAGES)[number];
 export const STAGE_ALLOWED: Record<Stage, string[]> = { load_checked: ['accepted'], route_back: ['in_progress'] };
 export const STAGE_NEEDS: Partial<Record<Stage, Stage>> = { route_back: 'load_checked' };
 /** Why a stop could not be served, or the route stopped. */
-export const FAIL_REASONS = ['shop_closed', 'refused', 'no_cash', 'no_space', 'vehicle_breakdown', 'other'] as const;
+export const FAIL_REASONS = ['shop_closed', 'refused', 'no_cash', 'no_space', 'vehicle_breakdown', 'temp_out_of_range', 'expired', 'late_window', 'other'] as const;
+
+/** Cold chain (coldchain pack, sector 3): temperature class of a route and its default range in °C. [تخمين] confirm with the first food distributor */
+export const TEMP_CLASSES = ['ambient', 'chilled', 'frozen'] as const;
+export type TempClass = (typeof TEMP_CLASSES)[number];
+export const TEMP_DEFAULTS: Record<TempClass, [number, number] | null> = { ambient: null, chilled: [0, 5], frozen: [-25, -18] };
+/** A chilled or frozen route with no reading for this long while out is flagged. [تخمين] */
+export const READING_GAP_MINUTES = 90;
+export const inRange = (c: number, min: number | null, max: number | null) => (min === null || max === null ? null : c >= min - 1e-9 && c <= max + 1e-9);
+
+/** A temperature in °C, -50..60, one decimal. */
+export function celsius(v: unknown, field: string): number {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < -50 || n > 60 || Math.abs(Math.round(n * 10) - n * 10) > 1e-6) throw new BadRequestException(`${field} must be -50 to 60 °C with up to 1 decimal`);
+  return n;
+}
+
+/** On time = recorded within the stop's window (a stop without a window counts as on time). */
+export function onTime(doneAt: Date | string | null, windowTo: Date | string | null): boolean | null {
+  if (!doneAt) return null;
+  return !windowTo || new Date(doneAt).getTime() <= new Date(windowTo).getTime();
+}
 export const UNITS = ['piece', 'carton', 'crate', 'kg', 'liter', 'bag'] as const;
 export const SKU = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 
-export interface Item { sku: string; name: string; qty: number; price: string }
+export interface Item { sku: string; name: string; qty: number; price: string; expiry?: string }
 export type Qty = Record<string, number>;
 
 /** Quantities in thousandths so sums stay exact (3 decimals: kg, litres). */

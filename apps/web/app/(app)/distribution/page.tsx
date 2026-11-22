@@ -1,24 +1,27 @@
 'use client';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { DIST_FAIL, dt, km, money, PRODUCT_UNIT, qtyText, ROUTE_STATUS, TASK_STATUS, time, todayKw } from '@/lib/format';
-import { can, useMe } from '@/components/me';
+import { DIST_FAIL, dt, km, money, PRODUCT_UNIT, qtyText, ROUTE_STATUS, TASK_STATUS, TEMP_CLASS, time, todayKw } from '@/lib/format';
+import { can, hasPack, useMe } from '@/components/me';
 import { Badge, clean, Empty, ErrorBox, Kpi, Modal, Tabs, Tone, useAction, useAssets, useForm, useLoad } from '@/components/ui';
 
-interface Item { sku: string; name: string; qty: number; price: string }
+interface Item { sku: string; name: string; qty: number; price: string; expiry?: string }
 interface Stop {
   task_id: string; seq: number; name: string; payment: 'cash' | 'credit'; items: Item[]; delivered: Record<string, number> | null; returned: Record<string, number> | null;
   cash_due: string | null; cash_collected: string | null; received_by: string | null; closed_reason: string | null; done_at: string | null; status: string; address: string | null;
+  window_from: string | null; window_to: string | null; damaged: Record<string, number> | null;
 }
 interface Route {
   id: string; ref: string; legal_entity_id: string; route_date: string; task_id: string; asset_id: string; plate_no: string | null; driver_name: string; status: string; task_status: string;
   notes: string | null; loaded_at: string | null; out_at: string | null; back_at: string | null; start_odometer_km: number | null; end_odometer_km: number | null; km: number | null;
   cash_received: string | null; settled_at: string | null; settle_note: string | null; cancel_reason: string | null; version: number; window_from: string; window_to: string;
   stops: number; stops_done: number; stops_failed: number; cash_due: string; cash_collected: string;
+  temp_class: string; temp_min: number | null; temp_max: number | null; last_reading: { reading_c: number; recorded_at: string; in_range: boolean | null } | null;
 }
 interface RouteDetail extends Omit<Route, 'stops'> {
   stops: Stop[]; load: { sku: string; name: string; qty: number }[];
   reconcile: { sku: string; name: string; loaded: number; delivered: number; returned: number; back: number }[]; variance: string | null;
+  temps: { id: string; stop_task_id: string | null; reading_c: number; source: string; device_ref: string | null; in_range: boolean | null; recorded_at: string; note: string | null }[];
 }
 interface Product { id: string; legal_entity_id: string; sku: string; name: string; unit: string; price: string; active: boolean }
 type Tab = 'board' | 'exceptions' | 'report' | 'products';
@@ -67,7 +70,7 @@ export default function DistributionPage() {
                   <td className="num">{r.plate_no}</td><td>{r.driver_name}</td><td className="num">{time(r.window_from)}–{time(r.window_to)}</td>
                   <td><span className="num">{r.stops_done}/{r.stops}</span>{r.stops_failed > 0 && <> <Badge tone="danger">{r.stops_failed} تعذّر</Badge></>}</td>
                   <td className="num">{Number(r.cash_collected).toFixed(3)} / {Number(r.cash_due).toFixed(3)}</td>
-                  <td><Tone map={ROUTE_STATUS} value={r.status} /></td>
+                  <td><Tone map={ROUTE_STATUS} value={r.status} />{r.temp_class !== 'ambient' && <> <Badge tone={r.last_reading?.in_range === false ? 'danger' : 'info'}>{TEMP_CLASS[r.temp_class]}{r.last_reading ? ` ${r.last_reading.reading_c}°` : ''}</Badge></>}</td>
                 </tr>
               ))}</tbody>
             </table></div>
@@ -101,6 +104,7 @@ function RouteModal({ id, onClose, onChange }: { id: string; onClose: () => void
           <dl className="dl">
             <dt>اليوم</dt><dd className="num">{p.route_date} · {time(p.window_from)}–{time(p.window_to)}</dd>
             <dt>المركبة والسائق</dt><dd><strong className="num">{p.plate_no}</strong> · {p.driver_name}</dd>
+            {p.temp_class !== 'ambient' && <><dt>الحرارة</dt><dd>{TEMP_CLASS[p.temp_class]} · النطاق <span className="num">{p.temp_min}° إلى {p.temp_max}°</span></dd></>}
             {p.loaded_at && <><dt>مراجعة الحمولة</dt><dd><span className="num">{dt(p.loaded_at)}</span> · عدّاد {km(p.start_odometer_km)}</dd></>}
             {p.out_at && <><dt>الانطلاق</dt><dd className="num">{dt(p.out_at)}</dd></>}
             {p.back_at && <><dt>العودة</dt><dd><span className="num">{dt(p.back_at)}</span> · عدّاد {km(p.end_odometer_km)} · المسافة <strong>{km(p.km)}</strong></dd></>}
@@ -110,19 +114,20 @@ function RouteModal({ id, onClose, onChange }: { id: string; onClose: () => void
           </dl>
           <section><h3>التوقفات</h3>
             <div className="tbl-wrap"><table data-testid="stops">
-              <thead><tr><th>#</th><th>الجهة</th><th>المخطط</th><th>المسلَّم</th><th>المرتجع</th><th>النقد</th><th>الحالة</th></tr></thead>
+              <thead><tr><th>#</th><th>الجهة</th><th>المخطط</th><th>المسلَّم</th><th>المرتجع</th><th>التالف</th><th>النقد</th><th>الحالة</th></tr></thead>
               <tbody>{p.stops.map((s) => (
                 <tr key={s.task_id}>
                   <td className="num">{s.seq}</td>
-                  <td>{s.name}<div className="muted">{s.payment === 'cash' ? 'نقدًا' : 'على الحساب'}{s.received_by && <> · استلم {s.received_by}</>}</div></td>
-                  <td>{s.items.map((i) => `${i.name} ${qtyText(i.qty)}`).join('، ')}</td>
-                  <td>{qtyLine(s.delivered, s.items)}</td><td>{qtyLine(s.returned, s.items)}</td>
+                  <td>{s.name}<div className="muted">{s.payment === 'cash' ? 'نقدًا' : 'على الحساب'}{s.received_by && <> · استلم {s.received_by}</>}{(s.window_from || s.window_to) && <> · <span className="num">{time(s.window_from)}–{time(s.window_to)}</span></>}</div></td>
+                  <td>{s.items.map((i) => `${i.name} ${qtyText(i.qty)}${i.expiry ? ` (صلاحية ${i.expiry})` : ''}`).join('، ')}</td>
+                  <td>{qtyLine(s.delivered, s.items)}</td><td>{qtyLine(s.returned, s.items)}</td><td>{qtyLine(s.damaged, s.items)}</td>
                   <td className="num">{s.payment === 'cash' && s.done_at ? <>{Number(s.cash_collected).toFixed(3)} / {Number(s.cash_due).toFixed(3)}</> : '—'}</td>
                   <td><Tone map={TASK_STATUS} value={s.status} />{s.closed_reason && <div><Badge tone="danger">{DIST_FAIL[s.closed_reason] ?? s.closed_reason}</Badge></div>}</td>
                 </tr>
               ))}</tbody>
             </table></div>
           </section>
+          {(p.temp_class !== 'ambient' || p.temps.length > 0) && <TempsCard r={p} onDone={done} />}
           <section><h3>{p.back_at ? 'مطابقة الحمولة' : 'قائمة التحميل'}</h3>
             <div className="tbl-wrap"><table data-testid="reconcile">
               <thead><tr><th>الصنف</th><th>المحمّل</th><th>المسلَّم</th><th>المرتجع من العملاء</th><th>يعود للمستودع</th></tr></thead>
@@ -154,8 +159,36 @@ function RouteModal({ id, onClose, onChange }: { id: string; onClose: () => void
   );
 }
 
-interface StopDraft { name: string; address: string; phone: string; payment: 'cash' | 'credit'; items: { sku: string; qty: string }[] }
-const emptyStop = (): StopDraft => ({ name: '', address: '', phone: '', payment: 'credit', items: [{ sku: '', qty: '' }] });
+interface StopDraft { name: string; address: string; phone: string; payment: 'cash' | 'credit'; window_from: string; window_to: string; items: { sku: string; qty: string; expiry: string }[] }
+const emptyStop = (): StopDraft => ({ name: '', address: '', phone: '', payment: 'credit', window_from: '', window_to: '', items: [{ sku: '', qty: '', expiry: '' }] });
+
+function TempsCard({ r, onDone }: { r: RouteDetail; onDone: (x: RouteDetail) => void }) {
+  const me = useMe();
+  const act = useAction();
+  const [c, setC] = useState('');
+  const [device, setDevice] = useState('');
+  const stopName = (id: string | null) => r.stops.find((s) => s.task_id === id)?.name;
+  return (
+    <section className="card stack" data-testid="temps">
+      <h3>قراءات الحرارة</h3>
+      {r.temps.length === 0 ? <Empty>لا توجد قراءات بعد</Empty> : (
+        <div className="tbl-wrap"><table><thead><tr><th>الوقت</th><th>الحرارة</th><th>المصدر</th><th>عند</th><th></th></tr></thead>
+          <tbody>{r.temps.map((x) => <tr key={x.id}><td className="num">{dt(x.recorded_at)}</td><td className="num"><strong>{x.reading_c}°</strong></td>
+            <td>{x.source === 'manual' ? 'يدوي' : x.source === 'device' ? `جهاز ${x.device_ref}` : `تطبيق خارجي ${x.device_ref}`}</td><td>{stopName(x.stop_task_id) ?? '—'}</td>
+            <td>{x.in_range === false ? <Badge tone="danger">خارج النطاق</Badge> : x.in_range ? <Badge tone="success">ضمن النطاق</Badge> : null}</td></tr>)}</tbody></table></div>
+      )}
+      {can(me, 'tasks:write') && r.status !== 'canceled' && (
+        <form className="row" onSubmit={(e) => { e.preventDefault(); void act.run(async () => { onDone(await api<RouteDetail>(`/distribution/routes/${r.id}/temps`, { method: 'POST', body: { reading_c: Number(c), ...(device ? { source: 'device', device_ref: device } : {}) } })); setC(''); }); }}>
+          <input name="reading_c" value={c} onChange={(e) => setC(e.target.value)} className="num" inputMode="decimal" pattern="-?\d{1,2}(\.\d)?" required placeholder="°C" style={{ width: 90 }} aria-label="الحرارة" />
+          <input name="device_ref" value={device} onChange={(e) => setDevice(e.target.value)} maxLength={80} placeholder="رقم جهاز التسجيل (اختياري)" aria-label="رقم الجهاز" />
+          <button disabled={act.busy}>تسجيل قراءة</button>
+        </form>
+      )}
+      <ErrorBox error={act.error} />
+      <p className="muted" style={{ margin: 0 }}>القراءات يسجلها السائق من شاشة الثلاجة، أو المكتب، أو جهاز تسجيل برقمه. لا تُفترض حرارة بلا قراءة.</p>
+    </section>
+  );
+}
 
 function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => void; onDone: (r: RouteDetail) => void }) {
   const me = useMe();
@@ -163,7 +196,8 @@ function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => voi
   const workers = useLoad(() => api<{ data: { id: string; display_name: string; kind: string; status: string; legal_entity_id: string }[] }>('/workers?status=active').then((r) => r.data));
   const products = useLoad(() => api<{ data: Product[] }>('/distribution/products').then((r) => r.data.filter((p) => p.active)));
   const act = useAction();
-  const { f, bind } = useForm({ legal_entity_id: me.legal_entities[0]?.id ?? '', route_date: date, asset_id: '', driver_worker_id: '', start_time: '06:00', end_time: '18:00', notes: '' });
+  const cold = hasPack(me, 'coldchain');
+  const { f, bind } = useForm({ legal_entity_id: me.legal_entities[0]?.id ?? '', route_date: date, asset_id: '', driver_worker_id: '', start_time: '06:00', end_time: '18:00', notes: '', temp_class: 'ambient' });
   const [stops, setStops] = useState<StopDraft[]>([emptyStop()]);
   const setStop = (i: number, p: Partial<StopDraft>) => setStops(stops.map((s, j) => (j === i ? { ...s, ...p } : s)));
   const setItem = (i: number, k: number, p: Partial<StopDraft['items'][number]>) => setStop(i, { items: stops[i].items.map((x, j) => (j === k ? { ...x, ...p } : x)) });
@@ -171,8 +205,9 @@ function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => voi
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     void act.run(async () => onDone(await api<RouteDetail>('/distribution/routes', { method: 'POST', body: {
-      ...clean({ legal_entity_id: f.legal_entity_id, route_date: f.route_date, asset_id: f.asset_id, driver_worker_id: f.driver_worker_id, start_time: f.start_time, end_time: f.end_time, notes: f.notes }),
-      stops: stops.map((s) => ({ name: s.name, payment: s.payment, ...clean({ address: s.address, phone: s.phone }), items: s.items.filter((x) => x.sku && x.qty).map((x) => ({ sku: x.sku, qty: Number(x.qty) })) })),
+      ...clean({ legal_entity_id: f.legal_entity_id, route_date: f.route_date, asset_id: f.asset_id, driver_worker_id: f.driver_worker_id, start_time: f.start_time, end_time: f.end_time, notes: f.notes, temp_class: f.temp_class }),
+      stops: stops.map((s) => ({ name: s.name, payment: s.payment, ...clean({ address: s.address, phone: s.phone, window_from: s.window_from, window_to: s.window_to }),
+        items: s.items.filter((x) => x.sku && x.qty).map((x) => ({ sku: x.sku, qty: Number(x.qty), ...clean({ expiry: x.expiry }) })) })),
     } })));
   };
   return (
@@ -186,6 +221,7 @@ function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => voi
           <label className="field">السائق<select {...bind('driver_worker_id')} required><option value="">اختر</option>{workers.data?.filter((w) => w.legal_entity_id === f.legal_entity_id && ['driver', 'courier'].includes(w.kind)).map((w) => <option key={w.id} value={w.id}>{w.display_name}</option>)}</select></label>
           <label className="field">من<input type="time" {...bind('start_time')} required /></label>
           <label className="field">إلى<input type="time" {...bind('end_time')} required /></label>
+          {cold && <label className="field">الحرارة<select {...bind('temp_class')}><option value="ambient">عادي</option><option value="chilled">مبرد (0° إلى 5°)</option><option value="frozen">مجمد (-25° إلى -18°)</option></select></label>}
         </div>
         {stops.map((s, i) => (
           <fieldset key={i} className="card stack" data-testid={`stop-${i + 1}`}>
@@ -194,6 +230,8 @@ function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => voi
               <label className="field">الفرع أو العميل<input value={s.name} onChange={(e) => setStop(i, { name: e.target.value })} required maxLength={120} aria-label={`اسم التوقف ${i + 1}`} /></label>
               <label className="field">العنوان<input value={s.address} onChange={(e) => setStop(i, { address: e.target.value })} maxLength={300} aria-label={`عنوان التوقف ${i + 1}`} /></label>
               <label className="field">الدفع<select value={s.payment} onChange={(e) => setStop(i, { payment: e.target.value as 'cash' | 'credit' })} aria-label={`دفع التوقف ${i + 1}`}><option value="credit">على الحساب</option><option value="cash">نقدًا عند التسليم</option></select></label>
+              {cold && <label className="field">نافذة التسليم من<input type="time" value={s.window_from} onChange={(e) => setStop(i, { window_from: e.target.value })} aria-label={`نافذة التوقف ${i + 1} من`} /></label>}
+              {cold && <label className="field">إلى<input type="time" value={s.window_to} onChange={(e) => setStop(i, { window_to: e.target.value })} aria-label={`نافذة التوقف ${i + 1} إلى`} /></label>}
             </div>
             {s.items.map((x, k) => (
               <div key={k} className="row">
@@ -201,10 +239,11 @@ function PlanRoute({ date, onClose, onDone }: { date: string; onClose: () => voi
                   <option value="">الصنف</option>{prods.map((p) => <option key={p.sku} value={p.sku}>{p.name} ({PRODUCT_UNIT[p.unit] ?? p.unit})</option>)}
                 </select>
                 <input value={x.qty} onChange={(e) => setItem(i, k, { qty: e.target.value })} className="num" inputMode="decimal" style={{ width: 100 }} placeholder="الكمية" aria-label={`كمية ${k + 1} للتوقف ${i + 1}`} required={k === 0} />
+                {cold && <input type="date" value={x.expiry} onChange={(e) => setItem(i, k, { expiry: e.target.value })} title="تاريخ الصلاحية" aria-label={`صلاحية ${k + 1} للتوقف ${i + 1}`} />}
               </div>
             ))}
             <div className="row">
-              <button type="button" className="small" onClick={() => setStop(i, { items: [...s.items, { sku: '', qty: '' }] })}>+ صنف</button>
+              <button type="button" className="small" onClick={() => setStop(i, { items: [...s.items, { sku: '', qty: '', expiry: '' }] })}>+ صنف</button>
               {stops.length > 1 && <button type="button" className="small danger" onClick={() => setStops(stops.filter((_, j) => j !== i))}>حذف التوقف</button>}
             </div>
           </fieldset>
