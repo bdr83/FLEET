@@ -19,6 +19,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/coldchain', label: 'سلسلة التبريد', perm: 'tasks:read', pack: 'coldchain' },
   { href: '/courier', label: 'البريد السريع', perm: 'tasks:read', pack: 'courier' },
   { href: '/warehouse', label: 'المستودعات', perm: 'tasks:read', pack: 'warehouse' },
+  { href: '/ecommerce', label: 'طلبات المتاجر', perm: 'tasks:read', pack: 'ecommerce' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },

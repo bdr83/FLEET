@@ -54,6 +54,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد', hint: 'مسارات مبردة ومجمدة، نوافذ تسليم، قراءات حرارة، تالف وصلاحية' },
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع', hint: 'بوليصات ومحطات، مسح الباركود، محاولات التسليم، الإرجاع للمرسل' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين', hint: 'مواقع تخزين، استلام وصرف، أقدم صلاحية أولًا، جرد، تخزين للعملاء' },
+  { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
@@ -250,3 +251,12 @@ export const LOC_KIND: Record<string, string> = { storage: 'تخزين', pick: '
 export const WH_ORDER_STATUS: Record<string, { label: string; tone: string }> = {
   open: { label: 'مفتوح', tone: 'info' }, picked: { label: 'جُمع', tone: 'warning' }, shipped: { label: 'شُحن', tone: 'success' }, canceled: { label: 'ملغى', tone: 'muted' },
 };
+
+/** E-commerce fulfilment (ecommerce pack) labels: the status a store sees. */
+export const ECOM_STATUS: Record<string, { label: string; tone: string }> = {
+  received: { label: 'مستلم', tone: 'muted' }, processing: { label: 'قيد التجهيز', tone: 'info' }, ready_to_ship: { label: 'جاهز للشحن', tone: 'info' },
+  confirmed: { label: 'بانتظار السائق', tone: 'info' }, out_for_delivery: { label: 'خرج للتوصيل', tone: 'warning' }, delivered: { label: 'تم التسليم', tone: 'success' },
+  failed: { label: 'تعذر التسليم', tone: 'danger' }, returning_to_store: { label: 'راجع للمتجر', tone: 'warning' }, returned_to_store: { label: 'أُرجع للمتجر', tone: 'muted' },
+  canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const ECOM_SOURCE: Record<string, string> = { api: 'API', import: 'ملف', office: 'المكتب' };

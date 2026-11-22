@@ -19,7 +19,7 @@ d('sector packs per company', () => {
 
     expect((await http().get('/v1/me').set(T).expect(200)).body.packs).toEqual(['concrete']);
     const p = await http().get('/v1/packs').set(T).expect(200);
-    expect(p.body.available.map((x: { code: string }) => x.code)).toEqual(['delivery', 'freight', 'coldchain', 'courier', 'warehouse', 'staffing', 'concrete', 'internal', 'distribution']);
+    expect(p.body.available.map((x: { code: string }) => x.code)).toEqual(['delivery', 'freight', 'coldchain', 'courier', 'warehouse', 'ecommerce', 'staffing', 'concrete', 'internal', 'distribution']);
 
     await http().get(`/v1/concrete/settings?legal_entity_id=${le}`).set(T).expect(200);
     const r = await http().get(`/v1/delivery/settings?legal_entity_id=${le}`).set(T).expect(403);
@@ -41,6 +41,6 @@ d('sector packs per company', () => {
   it('without a list, a new company gets every pack', async () => {
     const { user_token } = await login(app, newPhone());
     const t = await http().post('/v1/tenants').set(auth(user_token)).send({ name: 'شركة كاملة' }).expect(201);
-    expect((await http().get('/v1/me').set(auth(t.body.access_token)).expect(200)).body.packs).toHaveLength(9);
+    expect((await http().get('/v1/me').set(auth(t.body.access_token)).expect(200)).body.packs).toHaveLength(10);
   });
 });

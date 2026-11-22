@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -385,3 +385,32 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `POST /orders/:id/cancel` | `{reason}`؛ الأمر المجموع تعود بضاعته لمواقعها |
 | `GET /v1/warehouse/exceptions` | تحت حد الطلب، صلاحية منتهية أو خلال 30 يومًا [تخمين]، أوامر متأخرة (الموعد أو 24 ساعة [تخمين])، استلامات بفروق (7 أيام) |
 | `GET /v1/warehouse/report?from&to` | لكل مالك: استلامات ووحدات مستلمة ومصروفة وفروق الجرد وأوامر مشحونة والالتزام بالموعد ومتوسط ساعات الشحن والمخزون والمواقع المشغولة الآن |
+
+## قطاع شحن التجارة الإلكترونية ecommerce (القطاع 9)
+
+المتجر عميل في `crm.customer` يُفعَّل كمتجر بإعدادات استلامه. يرسل طلباته عبر الـ API بمفتاح خاص، أو يُدخلها المكتب أو يستوردها من ملف. كل طلب يصبح بوليصة بريد سريع إن كان نشاط `courier` مفعّلًا، وإلا مهمة توصيل `delivery@1`. وإن كان المتجر يخزّن عندنا (ونشاط `warehouse` مفعّل) يصبح أمر صرف من مستودعه ثم يُشحن. مبالغ COD والفواتير تبقى في دفاتر النواة.
+
+الحالة التي يراها المتجر: `received`، `processing` (يُجمع في المستودع)، `ready_to_ship`، `confirmed` (بانتظار السائق)، `out_for_delivery`، `delivered`، `failed`، `returning_to_store`، `returned_to_store`، `canceled`.
+
+### واجهة المكتب `/v1/ecommerce`
+
+| المسار | الوصف |
+|---|---|
+| `GET /merchants`، `PUT /merchants/:customerId` | المتاجر؛ الحفظ `{pickup{area,block,street,house,phone}, default_service: express\|same_day\|next_day, warehouse_id?, max_attempts 1-9, active}` (customers:write) |
+| `GET/POST /merchants/:customerId/keys`، `POST /keys/:id/revoke` | مفاتيح API: المفتاح الكامل `fpk_<prefix>_<secret>` يظهر في رد الإنشاء فقط، ونخزّن بصمته SHA-256 |
+| `GET /orders?customer_id&status&q`، `GET /orders/:id` | الطلبات (البحث برقم الطلب أو البوليصة أو الهاتف)؛ التفاصيل مع أحداث المهمة |
+| `POST /orders` | `{customer_id, order}` أو `{customer_id, orders[≤500]}`؛ لكل سطر `created` أو `duplicate` أو `error` |
+| `POST /orders/:id/cancel`، `POST /orders/:id/return` | `{reason}`؛ الإلغاء قبل خروج السائق (أو أمر صرف مفتوح أو مجموع)، والإرجاع بعد التسليم مهمة عكسية لعنوان المتجر |
+| `GET /exceptions` | لم تُشحن بعد 24 ساعة [تخمين]، تعذر تسليمها، مرتجعات مفتوحة، ومبالغ COD المستحقة لكل متجر من الدفتر |
+| `GET /merchants/:customerId/statement?from&to` | كشف المتجر: الطلبات ونتائجها وCOD المحصّل، وCOD عندنا الآن ناقص الفواتير غير المدفوعة = الصافي المستحق (billing:read) |
+
+### واجهة المتجر `/v1/ecom/api` (الترويسة `X-Api-Key`)
+
+| المسار | الوصف |
+|---|---|
+| `POST /orders` | `{external_id, recipient{name?, phone}, dropoff{area, block?, street?, house?}, items?[{sku?, name, qty}], cod_amount?, service?, pieces?, notes?}`؛ 201، أو 200 مع `duplicate: true` لنفس `external_id` |
+| `GET /orders?since=<ISO>` | الطلبات التي تغيّرت منذ الوقت المحدد |
+| `GET /orders/:external_id` | `{external_id, status, awb, tracking_url, attempt, fail_reason, cod_amount, cod_collected, return_status, created_at, updated_at, delivered_at}` |
+| `POST /orders/:external_id/cancel`، `POST /orders/:external_id/return` | `{reason}` |
+
+المفتاح الخاطئ أو الملغى، أو المتجر الموقوف، أو الشركة الموقوفة، أو إيقاف النشاط: 401. المتجر يرى طلباته فقط.
