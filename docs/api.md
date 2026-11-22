@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment، rental) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -451,3 +451,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | لكل عميل: الأيام والمعتمد والساعات الفعلية والتوقف والمفوتر. لكل معدة: نسبة الاستخدام |
 
 المشغّل: مهمة `equipment@1` تحمل في `attributes` الحقول `hire_ref`، `machine_type`، `min_hours`، `work_date`. محطتا `work_start` و`work_end` في `POST /v1/driver/sync` تحتاجان `meter_hours`. وتقبل `work_end` أيضًا `downtime_hours` و`received_by` (مشرف الموقع، إلزامي). رموز الرفض: `meter_required`، `meter_too_low`، `meter_invalid`، `signer_required`.
+
+## قطاع تأجير السيارات rental (القطاع 17)
+
+عقد الإيجار يؤجّر سيارة لعميل (فرد أو شركة) لفترة، بسعر يومي أو أسبوعي أو شهري يدخله المكتب. العقد مهمة `rental@1` تحجز السيارة حصريًا من الاستلام إلى الإرجاع، فلا يحجزها قطاع آخر في الفترة نفسها. لكل عقد سائق أول (المستأجر) وحتى ثلاثة سائقين إضافيين، وكل الرخص يجب أن تكون سارية حتى موعد الإرجاع. الاستلام والإرجاع يسجّلان العدّاد والوقود (بالأثمان) والأضرار. عند الإرجاع تُحسب الرسوم: الأيام (كل 24 ساعة، واليوم الجديد يبدأ بعد ساعة سماح [تخمين])، والكيلومترات الزائدة عن المسموح، ونقص الوقود، والأضرار. العربون يُسجَّل فقط ويُخصم من الإجمالي. السعر الأسبوعي أو الشهري يحسب الأيام الباقية بالتناسب، ولا تتجاوز وحدة إضافية [تخمين].
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/rental/agreements` | `{legal_entity_id, branch_id?, customer_id, asset_id, drivers[{name, phone?, civil_id?, licence_no, licence_expiry}], pickup_at, return_due, rate_unit day\|week\|month, rate, km_per_day?, extra_km_rate?, fuel_rate?, deposit?, notes?}`. 400 `licence_expires`، و409 `vehicle_booked` |
+| `GET /agreements/:id` | العقد مع مهام التوصيل والاستلام والمخالفات |
+| `POST /agreements/:id/checkout` | التسليم في الفرع `{odometer_km, fuel?, damage?, at?}`. العدّاد لا يقل عن آخر قراءة. 409 `vehicle_still_out` إذا لم ترجع السيارة من عقد سابق |
+| `POST /agreements/:id/checkin` | الإرجاع `{odometer_km, fuel?, damage?, damage_amount?, at?}` ويعيد الرسوم و`balance` (الإجمالي ناقص العربون) |
+| `POST /agreements/:id/extend` | `{return_due}` إذا كانت السيارة غير محجوزة بعده والرخص سارية |
+| `POST /agreements/:id/cancel` | `{reason}` قبل التسليم |
+| `POST /agreements/:id/moves` | توصيل أو استلام بسائق `{kind: deliver\|collect, driver_worker_id, address, at?}`. يحجز السائق ساعة [تخمين] |
+| `GET /fleet` | السيارات: مع من، وموعد الإرجاع، والحجز التالي |
+| `GET/POST /fines`، `POST /fines/:id` | المخالفات `{asset_id, occurred_at, amount, fine_no?, description?}` تُطابَق مع العقد وقت المخالفة. الحالة: `open`، `charged`، `waived`، `paid_by_us` |
+| `GET /exceptions?date` | متأخرة الإرجاع، حجوزات لم تُستلم بعد ساعة [تخمين]، الاستلام والإرجاع اليوم، توصيل تعذّر، مخالفات مفتوحة |
+| `GET /report?from&to` | العقود المغلقة حسب العميل (أيام، كم، إيجار، كم زائد، وقود، أضرار، إجمالي)، واستغلال كل سيارة، والمخالفات |
+
+السائق: مهمة `rental@1` من نوع `deliver` أو `collect` تحمل في `attributes` الحقول `rental_ref`، `plate_no`، `renter_name`، `renter_phone`، `address`. محطة `handover` (للتوصيل) أو `collected` (للاستلام) في `POST /v1/driver/sync` تُقبل أثناء المهمة، وتحتاج `odometer_km` و`fuel`. وتحتاج `handover` أيضًا `received_by`. وهي نفس التسليم والإرجاع في الفرع. إنهاء المهمة يحتاج المحطة. رموز الرفض: `odometer_required`، `odometer_too_low`، `receiver_required`، `vehicle_still_out`، `vehicle_booked`.

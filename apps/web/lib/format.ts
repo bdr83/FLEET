@@ -58,6 +58,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
+  { code: 'rental', sector: 17, label: 'تأجير السيارات', hint: 'حجوزات وعقود إيجار، استلام وإرجاع بالعدّاد والوقود، رسوم الكيلومترات والوقود والأضرار، توصيل للعميل، المخالفات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
@@ -278,3 +279,14 @@ export const HIRE_STATE: Record<string, { label: string; tone: string }> = {
   booked: { label: 'محجوز', tone: 'info' }, on_hire: { label: 'مؤجَّر', tone: 'success' }, ended: { label: 'انتهى', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
 };
 export const HEAVY_TYPES = ['excavator', 'loader', 'crane', 'forklift', 'bulldozer', 'roller', 'grader'];
+
+/** Car rental (rental pack) labels. */
+export const RENTAL_UNIT: Record<string, string> = { day: 'يومي', week: 'أسبوعي', month: 'شهري' };
+export const RENTAL_STATE: Record<string, { label: string; tone: string }> = {
+  reserved: { label: 'محجوز', tone: 'info' }, out: { label: 'مع العميل', tone: 'success' }, overdue: { label: 'متأخر الإرجاع', tone: 'danger' },
+  returned: { label: 'أُرجعت', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const FINE_STATUS: Record<string, { label: string; tone: string }> = {
+  open: { label: 'مفتوحة', tone: 'warning' }, charged: { label: 'على المستأجر', tone: 'info' }, waived: { label: 'معفاة', tone: 'muted' }, paid_by_us: { label: 'دفعتها الشركة', tone: 'muted' },
+};
+export const RENTAL_TYPES = ['car', 'van', 'pickup', 'motorbike', 'bus', 'truck'];

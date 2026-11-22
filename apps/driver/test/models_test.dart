@@ -231,6 +231,21 @@ void main() {
     expect(parseMeter('-3'), isNull);
   });
 
+  test('rental car: deliver with hand-over, collect, labels', () {
+    final t = task('assigned', pack: 'rental@1', attrs: {'kind': 'deliver', 'rental_ref': 'RA-1', 'renter_name': 'فهد', 'address': 'السالمية، ق 10'});
+    expect((t.isRental, t.isCollect, t.address), (true, false, 'السالمية، ق 10'));
+    expect(nextActions(t), [TaskAction.accept]);
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.start]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.handover, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'handover')), [TaskAction.complete]);
+    final c = task('in_progress', pack: 'rental@1', attrs: {'kind': 'collect'});
+    expect(nextActions(c), [TaskAction.collected, TaskAction.fail]);
+    expect(actionLabel(c, TaskAction.start), 'انطلقت لاستلام السيارة');
+    expect(actionLabel(t, TaskAction.handover), 'سلّمت السيارة للعميل');
+    expect(failReasonsFor(t), rentalFailReasons);
+    expect(task('assigned', pack: 'rental@1', attrs: {'kind': 'rental'}).isRental, false);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

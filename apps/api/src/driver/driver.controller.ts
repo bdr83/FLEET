@@ -17,12 +17,14 @@ import * as freight from '../sectors/freight/freight';
 import * as shuttle from '../sectors/shuttle/shuttle';
 import * as equipment from '../sectors/equipment/equipment';
 import { equipStage } from '../sectors/equipment/equipment.controller';
+import * as rental from '../sectors/rental/rental';
+import { rentalStage } from '../sectors/rental/rental.controller';
 import { markRider } from '../sectors/shuttle/shuttle.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -45,6 +47,9 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
     const c = code as equipment.Stage;
     return (equipment.STAGES as readonly string[]).includes(code) ? { allowed: equipment.STAGE_ALLOWED[c], needs: equipment.STAGE_NEEDS[c] } : null;
   }
+  if (rental.isRental(pack)) {
+    return (rental.STAGES as readonly string[]).includes(code) ? { allowed: rental.STAGE_ALLOWED[code as rental.Stage] } : null;
+  }
   if (concrete.isConcrete(pack)) {
     const c = code as concrete.Stage;
     return (concrete.STAGES as readonly string[]).includes(code) ? { allowed: concrete.STAGE_ALLOWED[c], needs: concrete.STAGE_NEEDS[c] } : null;
@@ -53,7 +58,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -389,7 +394,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -428,6 +433,11 @@ export class DriverController {
           if (equipment.isEquipment(t.sector_pack)) {
             if (op.downtime_hours !== null && op.downtime_hours > 24) { reject('meter_invalid', t.status); continue; }
             const bad = await equipStage(c, op.task_id, op.code as equipment.Stage, { meter: op.meter_hours, downtime: op.downtime_hours, signedBy: op.received_by });
+            if (bad) { reject(bad, t.status); continue; }
+          }
+          if (rental.isRental(t.sector_pack)) {
+            // the driver's hand-over or collection is the same check-out or check-in as the counter
+            const bad = await rentalStage(c, a, op.task_id, op.code as rental.Stage, { km: op.odometer_km, fuel: op.fuel, at: op.occurred_at, receivedBy: op.received_by, note: op.note });
             if (bad) { reject(bad, t.status); continue; }
           }
           if (freight.isFreight(t.sector_pack)) {
@@ -574,6 +584,12 @@ export class DriverController {
           && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2',
                 [op.task_id, op.to_status === 'in_progress' ? 'vehicle_out' : 'vehicle_back'])).rowCount) {
           reject(op.to_status === 'in_progress' ? 'stage_out_of_order' : 'proof_required', t.status); continue; // the trip starts and ends with the odometer
+        }
+        if (rental.isRental(t.sector_pack) && op.to_status === 'completed') {
+          // a delivery ends with the hand-over, a collection with the vehicle taken back
+          const kind = t.attributes?.kind as 'deliver' | 'collect';
+          if (!rental.STAGE_OF[kind]) { reject('not_supported', t.status); continue; }
+          if (!(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rental.STAGE_OF[kind]])).rowCount) { reject('proof_required', t.status); continue; }
         }
         if (freight.isFreight(t.sector_pack) && (op.to_status === 'in_progress' || op.to_status === 'completed')
           && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.to_status === 'in_progress' ? 'loaded' : 'unloaded'])).rowCount) {

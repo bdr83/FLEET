@@ -125,6 +125,20 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isRental) ...[
+          Card(key: const Key('rental-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('تأجير سيارة · ${t.rentalRef ?? ''}', style: text.labelMedium),
+            Text(t.isCollect ? 'استلام السيارة من العميل' : 'توصيل السيارة للعميل', style: text.titleLarge),
+            Row(children: [if (t.attributes['vehicle'] != null) Text('${t.attributes['vehicle']} '), if (t.attributes['plate_no'] != null) Ltr('${t.attributes['plate_no']}', style: text.titleMedium)]),
+            if (t.renterName != null) Text('المستأجر: ${t.renterName}'),
+            if (t.renterPhone != null) Row(children: [const Text('الهاتف: '), Ltr(t.renterPhone!)]),
+            if (t.isCollect && t.attributes['out_odometer_km'] != null)
+              Row(children: [const Text('عند التسليم: '), Ltr('${t.attributes['out_odometer_km']} كم'), if (t.attributes['out_fuel'] is num) Text(' · الوقود ${fuelLabel((t.attributes['out_fuel'] as num).toInt())}')]),
+            const SizedBox(height: 4),
+            Text(t.isCollect ? 'سجّل قراءة العدّاد والوقود عند استلام السيارة، واكتب أي ضرر جديد.' : 'تحقق من رخصة المستأجر، وسجّل العدّاد والوقود واسم المستلم عند التسليم.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isShuttle) ...[
           _ShuttleCard(t: t),
           const SizedBox(height: 12),
@@ -351,6 +365,16 @@ class _ActionsState extends State<_Actions> {
           toast(context, s.offline ? 'سُجّل انتهاء العمل وسيُرسل عند عودة الاتصال' : 'انتهى يوم العمل. الساعات بانتظار اعتماد المكتب');
           Navigator.of(context).pop();
         }
+      case TaskAction.handover:
+      case TaskAction.collected:
+        final collect = action == TaskAction.collected;
+        final r = await _odometer(context, collect ? 'استلام السيارة من العميل' : 'تسليم السيارة للعميل', collect ? 'تأكيد الاستلام' : 'تأكيد التسليم', receiver: !collect);
+        if (r == null) return;
+        final err = await s.rentalStep(task.id, collect: collect, odometerKm: r.km, fuel: r.fuel, receivedBy: r.receiver);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, s.offline ? 'سُجّل وسيُرسل عند عودة الاتصال' : collect ? 'استُلمت السيارة. أرجعها للفرع' : 'سُلّمت السيارة للعميل');
+        Navigator.of(context).pop();
       case TaskAction.returned:
         await s.milestone(task.id, 'returned_to_sender');
         if (context.mounted) Navigator.of(context).pop();
@@ -420,11 +444,11 @@ class _ActionsState extends State<_Actions> {
   }
 
   /// Odometer (required) and fuel in eighths, for taking or bringing back the vehicle.
-  Future<({int km, int? fuel})?> _odometer(BuildContext context, String title, String confirm, {bool fuel = true}) async {
+  Future<({int km, int? fuel, String? receiver})?> _odometer(BuildContext context, String title, String confirm, {bool fuel = true, bool receiver = false}) async {
     final withFuel = fuel;
-    final odo = TextEditingController();
+    final odo = TextEditingController(), who = TextEditingController();
     int? level;
-    return showModalBottomSheet<({int km, int? fuel})>(
+    return showModalBottomSheet<({int km, int? fuel, String? receiver})>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
@@ -441,10 +465,12 @@ class _ActionsState extends State<_Actions> {
               for (final n in [0, 2, 4, 6, 8]) ChoiceChip(key: Key('fuel-$n'), label: Text(fuelLabel(n)), selected: level == n, onSelected: (v) => set(() => level = v ? n : null)),
             ]),
           ],
+          if (receiver) TextField(key: const Key('received-by'), controller: who, decoration: const InputDecoration(labelText: 'اسم المستلم'), onChanged: (_) => set(() {})),
           const SizedBox(height: 12),
           FilledButton(
             key: const Key('odometer-save'),
-            onPressed: int.tryParse(odo.text.trim()) == null ? null : () => Navigator.pop(ctx, (km: int.parse(odo.text.trim()), fuel: level)),
+            onPressed: int.tryParse(odo.text.trim()) == null || (receiver && who.text.trim().isEmpty) ? null
+                : () => Navigator.pop(ctx, (km: int.parse(odo.text.trim()), fuel: level, receiver: receiver ? who.text.trim() : null)),
             child: Text(confirm),
           ),
         ]),

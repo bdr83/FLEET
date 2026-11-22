@@ -9,6 +9,7 @@ export const PACKS = [
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة' },
+  { code: 'rental', sector: 17, label: 'تأجير السيارات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي' },
   { code: 'distribution', sector: 29, label: 'التوزيع للمصانع والمطاعم والتجزئة' },
