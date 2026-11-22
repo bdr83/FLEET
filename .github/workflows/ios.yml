@@ -1,7 +1,6 @@
 # تطبيق السائق على iOS: يبني ويرفع إلى TestFlight. يدوي فقط (دقائق macOS مكلفة في المستودعات الخاصة).
-# الأسرار (Settings → Secrets and variables → Actions):
-#   APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_KEY_P8 (محتوى ملف ‎.p8 كما هو، من App Store Connect → Users and Access → Integrations, دور Admin)
-#   APPLE_TEAM_ID (من developer.apple.com → Membership)
+# السر الوحيد المطلوب: APPSTORE_KEY_P8 (محتوى ملف ‎.p8 كما هو، من App Store Connect → Users and Access → Integrations، دور Admin).
+# Key ID و Issuer ID يُمرَّران عند التشغيل أو كأسرار APPSTORE_KEY_ID / APPSTORE_ISSUER_ID. Team ID ثابت أدناه.
 # قبل أول رفع: أنشئ التطبيق في App Store Connect بمعرّف الحزمة com.q8hub.driver.
 name: ios
 on:
@@ -11,6 +10,12 @@ on:
         description: 'Upload to TestFlight (needs the App Store Connect secrets)'
         type: boolean
         default: true
+      key_id:
+        description: 'App Store Connect API Key ID (if not in secrets)'
+        required: false
+      issuer_id:
+        description: 'App Store Connect Issuer ID (if not in secrets)'
+        required: false
 jobs:
   ios:
     runs-on: macos-latest
@@ -20,10 +25,11 @@ jobs:
         working-directory: apps/driver
     env:
       API_URL: ${{ vars.DRIVER_API_URL || 'https://api.q8hub.com' }}
-      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+      KEY_ID: ${{ inputs.key_id || secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ inputs.issuer_id || secrets.APPSTORE_ISSUER_ID }}
       KEY_P8: ${{ secrets.APPSTORE_KEY_P8 }}
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Team ID ليس سرًا (يظهر في كل تطبيق موقّع)
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID || '32D2T3AARG' }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
