@@ -1,0 +1,58 @@
+name: deploy
+# النشر إلى خادم التجربة بضغطة زر: Actions → deploy → Run workflow.
+# الإعداد مرة واحدة في Settings → Secrets and variables → Actions:
+#   Secrets:   DEPLOY_HOST (عنوان IP)، DEPLOY_SSH_KEY (مفتاح SSH خاص)، SMS_HTTP_URL، SMS_HTTP_HEADERS، SMS_HTTP_BODY
+#   Variables: APP_DOMAIN، API_DOMAIN، DEPLOY_USER (افتراضيًا root)، SMS_HTTP_FORM (اختياري)
+# أسرار قاعدة البيانات والجلسات تُولَّد على الخادم نفسه أول مرة ولا تمر بـ GitHub.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: وسم الصور (latest أو رقم التزام)
+        default: latest
+        required: true
+permissions:
+  contents: read
+  packages: read
+concurrency: deploy
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.DEPLOY_HOST }}
+      USER_: ${{ vars.DEPLOY_USER || 'root' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH key and host
+        run: |
+          test -n "$HOST" || { echo "DEPLOY_HOST secret is missing"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id && chmod 600 ~/.ssh/id
+          ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts
+      - name: Settings from GitHub
+        env:
+          APP_DOMAIN: ${{ vars.APP_DOMAIN }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+          SMS_HTTP_URL: ${{ secrets.SMS_HTTP_URL }}
+          SMS_HTTP_HEADERS: ${{ secrets.SMS_HTTP_HEADERS }}
+          SMS_HTTP_BODY: ${{ secrets.SMS_HTTP_BODY }}
+          SMS_HTTP_FORM: ${{ vars.SMS_HTTP_FORM }}
+        run: |
+          test -n "$APP_DOMAIN" && test -n "$API_DOMAIN" || { echo "APP_DOMAIN and API_DOMAIN variables are required"; exit 1; }
+          umask 077
+          {
+            echo "APP_DOMAIN=$APP_DOMAIN"; echo "API_DOMAIN=$API_DOMAIN"
+            if [ -n "$SMS_HTTP_URL" ]; then echo "SMS_PROVIDER=http"; fi
+            echo "SMS_HTTP_URL=$SMS_HTTP_URL"; echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"
+            echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"; echo "SMS_HTTP_FORM=$SMS_HTTP_FORM"
+          } > deploy/config.env
+      - name: Copy deploy files
+        run: |
+          ssh -i ~/.ssh/id "$USER_@$HOST" 'mkdir -p /opt/fleet/deploy'
+          scp -i ~/.ssh/id deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/backup.sh deploy/restore.sh deploy/update.sh deploy/remote.sh deploy/config.env "$USER_@$HOST:/opt/fleet/deploy/"
+      - name: Pull and start
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/id "$USER_@$HOST" "cd /opt/fleet/deploy && GHCR_USER='${{ github.actor }}' TAG='$TAG' bash ./remote.sh"
