@@ -43,6 +43,8 @@ services:
       SMS_HTTP_BODY: ${SMS_HTTP_BODY:-}
       SMS_HTTP_FORM: ${SMS_HTTP_FORM:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+    # على خادم مشترك فيه وكيل عكسي (nginx/Traefik/Caddy) يوجّه API_DOMAIN إلى هذا المنفذ المحلي
+    ports: ["127.0.0.1:${API_PORT:-3100}:3000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
 
@@ -56,10 +58,14 @@ services:
     restart: unless-stopped
     environment:
       API_URL: http://api:3000
+    ports: ["127.0.0.1:${WEB_PORT:-3101}:3001"]
     depends_on:
       api: { condition: service_healthy }
 
+  # خادم مخصص: COMPOSE_PROFILES=caddy يشغّل Caddy على 80/443 بشهادات تلقائية.
+  # خادم مشترك: اترك COMPOSE_PROFILES فارغًا ووجّه النطاقين من الوكيل الموجود إلى المنفذين المحليين أعلاه.
   caddy:
+    profiles: [caddy]
     image: caddy:2
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]

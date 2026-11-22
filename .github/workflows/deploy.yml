@@ -2,7 +2,8 @@ name: deploy
 # النشر إلى خادم التجربة بضغطة زر: Actions → deploy → Run workflow.
 # الإعداد مرة واحدة في Settings → Secrets and variables → Actions:
 #   Secrets:   DEPLOY_HOST (عنوان IP)، DEPLOY_SSH_KEY (مفتاح SSH خاص)، SMS_HTTP_URL، SMS_HTTP_HEADERS، SMS_HTTP_BODY
-#   Variables: APP_DOMAIN، API_DOMAIN، DEPLOY_USER (افتراضيًا root)، SMS_HTTP_FORM (اختياري)
+#   Variables: APP_DOMAIN، API_DOMAIN، DEPLOY_USER (افتراضيًا root)، SMS_HTTP_FORM (اختياري)،
+#              COMPOSE_PROFILES (caddy لخادم مخصص، فارغ لخادم مشترك خلف وكيل موجود)، API_PORT/WEB_PORT، MANAGE_FIREWALL (1 لخادم مخصص)
 # أسرار قاعدة البيانات والجلسات تُولَّد على الخادم نفسه أول مرة ولا تمر بـ GitHub.
 on:
   workflow_dispatch:
@@ -37,6 +38,9 @@ jobs:
           SMS_HTTP_HEADERS: ${{ secrets.SMS_HTTP_HEADERS }}
           SMS_HTTP_BODY: ${{ secrets.SMS_HTTP_BODY }}
           SMS_HTTP_FORM: ${{ vars.SMS_HTTP_FORM }}
+          COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
+          API_PORT: ${{ vars.API_PORT }}
+          WEB_PORT: ${{ vars.WEB_PORT }}
         run: |
           test -n "$APP_DOMAIN" && test -n "$API_DOMAIN" || { echo "APP_DOMAIN and API_DOMAIN variables are required"; exit 1; }
           umask 077
@@ -45,6 +49,7 @@ jobs:
             if [ -n "$SMS_HTTP_URL" ]; then echo "SMS_PROVIDER=http"; fi
             echo "SMS_HTTP_URL=$SMS_HTTP_URL"; echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"
             echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"; echo "SMS_HTTP_FORM=$SMS_HTTP_FORM"
+            echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:-none}"; echo "API_PORT=$API_PORT"; echo "WEB_PORT=$WEB_PORT"
           } > deploy/config.env
       - name: Copy deploy files
         run: |
@@ -55,4 +60,4 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
         run: |
-          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/id "$USER_@$HOST" "cd /opt/fleet/deploy && GHCR_USER='${{ github.actor }}' TAG='$TAG' bash ./remote.sh"
+          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/id "$USER_@$HOST" "cd /opt/fleet/deploy && GHCR_USER='${{ github.actor }}' TAG='$TAG' MANAGE_FIREWALL='${{ vars.MANAGE_FIREWALL }}' bash ./remote.sh"

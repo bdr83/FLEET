@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # يُشغَّل على الخادم من workflow ‏deploy (عبر SSH) في /opt/fleet/deploy. آمن للتكرار:
-# - يثبّت Docker والجدار الناري ومهمة النسخ الاحتياطي اليومية عند أول مرة.
+# - يثبّت Docker (والجدار الناري إن طُلب) ومهمة النسخ الاحتياطي اليومية عند أول مرة.
 # - ينشئ .env بأسرار عشوائية تُولَّد على الخادم نفسه ولا تغادره، ويحدّث الإعدادات القادمة من GitHub (config.env).
 # - يسحب الصور بالوسم TAG ويشغّلها، ثم يتحقق من صحة الخادم.
 set -euo pipefail
@@ -12,7 +12,8 @@ GHCR_TOKEN=""; [ -t 0 ] || read -r GHCR_TOKEN || true
 if ! command -v docker >/dev/null; then
   curl -fsSL https://get.docker.com | sh
 fi
-if command -v ufw >/dev/null; then
+# الجدار الناري فقط على خادم مخصص (MANAGE_FIREWALL=1)، حتى لا نغلق منافذ مشاريع أخرى على خادم مشترك
+if [ "${MANAGE_FIREWALL:-0}" = 1 ] && command -v ufw >/dev/null; then
   ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 443/udp >/dev/null
   ufw --force enable >/dev/null
 fi
@@ -55,8 +56,14 @@ docker compose up -d --remove-orphans
 docker image prune -f >/dev/null
 
 api=$(grep '^API_DOMAIN=' .env | cut -d= -f2)
+port=$(grep '^API_PORT=' .env | cut -d= -f2); port=${port:-3100}
+if grep -q '^COMPOSE_PROFILES=.*caddy' .env; then url="https://$api/health"; else url="http://127.0.0.1:$port/health"; fi
 for i in $(seq 1 30); do
-  if curl -fsS "https://$api/health" 2>/dev/null | grep -q '"ok"'; then echo "healthy: https://$api/health"; docker compose ps; exit 0; fi
+  if curl -fsS "$url" 2>/dev/null | grep -q '"ok"'; then
+    echo "healthy: $url"
+    [ "$url" = "https://$api/health" ] || curl -fsS -m 10 "https://$api/health" >/dev/null 2>&1 && echo "public: https://$api/health" || echo "public URL not reachable yet: point the existing reverse proxy at 127.0.0.1:$port ($api) and 127.0.0.1:$(grep '^WEB_PORT=' .env | cut -d= -f2) (app)"
+    docker compose ps; exit 0
+  fi
   sleep 5
 done
-echo "API not healthy over HTTPS yet (DNS or certificate?)"; docker compose ps; docker compose logs --tail 30 api caddy; exit 1
+echo "API not healthy at $url"; docker compose ps; docker compose logs --tail 30 api; exit 1
