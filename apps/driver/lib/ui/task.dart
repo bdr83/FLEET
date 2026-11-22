@@ -125,6 +125,23 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isService) ...[
+          Card(key: const Key('visit-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [Expanded(child: Text('بلاغ صيانة · ${t.attributes['job_ref'] ?? ''} · الزيارة ${t.attributes['seq'] ?? 1}', style: text.labelMedium)),
+              if (t.urgent) Text('عاجل', style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.error))]),
+            Text(serviceCategoryLabels[t.category] ?? t.category ?? '', style: text.titleLarge),
+            if (t.problem != null) Text(t.problem!, style: text.titleMedium),
+            if (t.unit != null) Text([t.unit!['brand'], t.unit!['model'], t.unit!['location']].whereType<String>().join(' · ')),
+            if (t.attributes['customer_name'] != null) Text('العميل: ${t.attributes['customer_name']}'),
+            if (t.attributes['contact_phone'] != null) Row(children: [const Text('الهاتف: '), Ltr('${t.attributes['contact_phone']}')]),
+            if (t.previousVisits.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('الزيارات السابقة', style: text.labelMedium),
+              for (final p in t.previousVisits) Text(p),
+            ],
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isRental) ...[
           Card(key: const Key('rental-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('تأجير سيارة · ${t.rentalRef ?? ''}', style: text.labelMedium),
@@ -365,6 +382,15 @@ class _ActionsState extends State<_Actions> {
           toast(context, s.offline ? 'سُجّل انتهاء العمل وسيُرسل عند عودة الاتصال' : 'انتهى يوم العمل. الساعات بانتظار اعتماد المكتب');
           Navigator.of(context).pop();
         }
+      case TaskAction.arrived: await s.milestone(task.id, 'arrived');
+      case TaskAction.workDone:
+        final r = await _serviceForm(context);
+        if (r == null) return;
+        final err = await s.serviceDone(task.id, result: r.result, workDone: r.work, signedBy: r.signer, parts: r.parts);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, s.offline ? 'سُجّلت الزيارة وستُرسل عند عودة الاتصال' : 'انتهت الزيارة وأُرسلت للمكتب');
+        Navigator.of(context).pop();
       case TaskAction.handover:
       case TaskAction.collected:
         final collect = action == TaskAction.collected;
@@ -439,6 +465,48 @@ class _ActionsState extends State<_Actions> {
             child: Text(end ? 'تأكيد الانتهاء' : 'تأكيد البدء'),
           ),
         ]),
+      )),
+    );
+  }
+
+  /// End of a service visit: the result, what was done, the parts used and the customer's name (all but parts required).
+  Future<({String result, String work, String signer, List<Map<String, dynamic>> parts})?> _serviceForm(BuildContext context) {
+    final work = TextEditingController(), who = TextEditingController(), part = TextEditingController(), qty = TextEditingController(text: '1');
+    String? result;
+    final parts = <Map<String, dynamic>>[];
+    return showModalBottomSheet<({String result, String work, String signer, List<Map<String, dynamic>> parts})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('نتيجة الزيارة', style: Theme.of(ctx).textTheme.titleLarge),
+          Wrap(spacing: 6, children: [
+            for (final e in serviceResultLabels.entries) ChoiceChip(key: Key('result-${e.key}'), label: Text(e.value), selected: result == e.key, onSelected: (v) => set(() => result = v ? e.key : null)),
+          ]),
+          TextField(key: const Key('work-done'), controller: work, maxLength: 500, maxLines: 2, decoration: const InputDecoration(labelText: 'ما تم من عمل'), onChanged: (_) => set(() {})),
+          Text('القطع المستخدمة', style: Theme.of(ctx).textTheme.labelMedium),
+          for (final p in parts) Row(children: [Expanded(child: Text('${p['name']}')), Ltr(qtyText(p['qty'] as double))]),
+          Row(children: [
+            Expanded(child: TextField(key: const Key('part-name'), controller: part, decoration: const InputDecoration(labelText: 'القطعة'), onChanged: (_) => set(() {}))),
+            const SizedBox(width: 8),
+            SizedBox(width: 70, child: TextField(key: const Key('part-qty'), controller: qty, keyboardType: const TextInputType.numberWithOptions(decimal: true), textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(labelText: 'الكمية'), onChanged: (_) => set(() {}))),
+            TextButton(key: const Key('part-add'), onPressed: part.text.trim().isEmpty || parseQty(qty.text) == null ? null : () => set(() {
+              parts.add({'name': part.text.trim(), 'qty': parseQty(qty.text)!});
+              part.clear();
+              qty.text = '1';
+            }), child: const Text('إضافة قطعة')),
+          ]),
+          TextField(key: const Key('signer'), controller: who, decoration: const InputDecoration(labelText: 'اسم العميل المستلم'), onChanged: (_) => set(() {})),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('visit-save'),
+            onPressed: result == null || work.text.trim().isEmpty || who.text.trim().isEmpty ? null
+                : () => Navigator.pop(ctx, (result: result!, work: work.text.trim(), signer: who.text.trim(), parts: parts)),
+            child: const Text('تأكيد انتهاء الزيارة'),
+          ),
+        ])),
       )),
     );
   }

@@ -18,13 +18,15 @@ import * as shuttle from '../sectors/shuttle/shuttle';
 import * as equipment from '../sectors/equipment/equipment';
 import { equipStage } from '../sectors/equipment/equipment.controller';
 import * as rental from '../sectors/rental/rental';
+import * as service from '../sectors/service/service';
+import { serviceStage } from '../sectors/service/service.controller';
 import { rentalStage } from '../sectors/rental/rental.controller';
 import { markRider } from '../sectors/shuttle/shuttle.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -47,6 +49,10 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
     const c = code as equipment.Stage;
     return (equipment.STAGES as readonly string[]).includes(code) ? { allowed: equipment.STAGE_ALLOWED[c], needs: equipment.STAGE_NEEDS[c] } : null;
   }
+  if (service.isService(pack)) {
+    const c = code as service.Stage;
+    return (service.STAGES as readonly string[]).includes(code) ? { allowed: service.STAGE_ALLOWED[c], needs: service.STAGE_NEEDS[c] } : null;
+  }
   if (rental.isRental(pack)) {
     return (rental.STAGES as readonly string[]).includes(code) ? { allowed: rental.STAGE_ALLOWED[code as rental.Stage] } : null;
   }
@@ -58,7 +64,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -351,7 +357,9 @@ export class DriverController {
           weight_kg: freight.kg(o.weight_kg, `ops[${i}].weight_kg`, { zero: true }), seal_no: v.str(o.seal_no, `ops[${i}].seal_no`, { max: 40 }),
           received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }),
           // the hour meter and breakdown downtime of a hired machine (equipment@1)
-          meter_hours: equipment.meter(o.meter_hours, `ops[${i}].meter_hours`), downtime_hours: equipment.meter(o.downtime_hours, `ops[${i}].downtime_hours`) };
+          meter_hours: equipment.meter(o.meter_hours, `ops[${i}].meter_hours`), downtime_hours: equipment.meter(o.downtime_hours, `ops[${i}].downtime_hours`),
+          // the end of a service visit (service@1): the result and the parts used (checked by the pack)
+          result: v.oneOf(o.result, `ops[${i}].result`, service.RESULTS), parts: o.parts ?? null };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       // a rider boarded or absent on a staff-transport trip (shuttle pack)
@@ -394,7 +402,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack) || service.isService(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -433,6 +441,10 @@ export class DriverController {
           if (equipment.isEquipment(t.sector_pack)) {
             if (op.downtime_hours !== null && op.downtime_hours > 24) { reject('meter_invalid', t.status); continue; }
             const bad = await equipStage(c, op.task_id, op.code as equipment.Stage, { meter: op.meter_hours, downtime: op.downtime_hours, signedBy: op.received_by });
+            if (bad) { reject(bad, t.status); continue; }
+          }
+          if (service.isService(t.sector_pack)) {
+            const bad = await serviceStage(c, a, op.task_id, op.code as service.Stage, { at: op.occurred_at, result: op.result, workDone: op.note, signedBy: op.received_by, parts: op.parts });
             if (bad) { reject(bad, t.status); continue; }
           }
           if (rental.isRental(t.sector_pack)) {
@@ -585,6 +597,10 @@ export class DriverController {
                 [op.task_id, op.to_status === 'in_progress' ? 'vehicle_out' : 'vehicle_back'])).rowCount) {
           reject(op.to_status === 'in_progress' ? 'stage_out_of_order' : 'proof_required', t.status); continue; // the trip starts and ends with the odometer
         }
+        if (service.isService(t.sector_pack) && op.to_status === 'completed'
+          && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'work_done'`, [op.task_id])).rowCount) {
+          reject('proof_required', t.status); continue; // the visit ends with its result
+        }
         if (rental.isRental(t.sector_pack) && op.to_status === 'completed') {
           // a delivery ends with the hand-over, a collection with the vehicle taken back
           const kind = t.attributes?.kind as 'deliver' | 'collect';
@@ -662,7 +678,7 @@ export class DriverController {
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
-      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null }
+      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null; result: string | null; parts: unknown }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }

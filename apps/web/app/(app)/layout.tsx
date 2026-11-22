@@ -23,6 +23,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/shuttle', label: 'نقل الموظفين', perm: 'tasks:read', pack: 'shuttle' },
   { href: '/equipment', label: 'تأجير المعدات', perm: 'tasks:read', pack: 'equipment' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
+  { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },
