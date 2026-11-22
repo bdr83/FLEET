@@ -57,6 +57,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
+  { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
@@ -87,7 +88,8 @@ export function ago(v: string | null | undefined): string {
 
 const tone = (label: string, t = 'muted') => ({ label, tone: t });
 export const ASSET_TYPE: Record<string, string> = {
-  car: 'سيارة', motorbike: 'دراجة نارية', van: 'فان', pickup: 'بيك أب', truck: 'شاحنة', mixer: 'خلاطة خرسانة', pump: 'مضخة', trailer: 'مقطورة', bus: 'باص', other: 'أخرى',
+  car: 'سيارة', motorbike: 'دراجة نارية', van: 'فان', pickup: 'بيك أب', truck: 'شاحنة', mixer: 'خلاطة خرسانة', pump: 'مضخة', trailer: 'مقطورة', bus: 'باص',
+  excavator: 'حفارة', loader: 'شيول', crane: 'رافعة (كرين)', forklift: 'رافعة شوكية', bulldozer: 'بلدوزر', roller: 'مدحلة', grader: 'جريدر', other: 'أخرى',
 };
 export const ASSET_STATUS: Record<string, { label: string; tone: string }> = {
   available: tone('متاحة', 'success'), in_use: tone('قيد الاستخدام', 'info'), out_of_service: tone('خارج الخدمة', 'danger'), retired: tone('مستبعدة'),
@@ -269,3 +271,10 @@ export const SHUTTLE_SKIP: Record<string, string> = {
   no_vehicle: 'بلا حافلة', no_driver: 'بلا سائق', vehicle_booked: 'الحافلة محجوزة في الوقت نفسه', driver_booked: 'السائق مشغول في الوقت نفسه',
   vehicle_out_of_service: 'الحافلة خارج الخدمة', driver_inactive: 'السائق غير نشط', past: 'موعد الرحلة مضى', not_generated: 'لم تُولَّد رحلته',
 };
+
+/** Heavy equipment hire (equipment pack) labels. */
+export const RATE_UNIT: Record<string, string> = { hour: 'بالساعة', day: 'باليوم', month: 'بالشهر' };
+export const HIRE_STATE: Record<string, { label: string; tone: string }> = {
+  booked: { label: 'محجوز', tone: 'info' }, on_hire: { label: 'مؤجَّر', tone: 'success' }, ended: { label: 'انتهى', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const HEAVY_TYPES = ['excavator', 'loader', 'crane', 'forklift', 'bulldozer', 'roller', 'grader'];

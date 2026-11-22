@@ -113,6 +113,18 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isEquipment) ...[
+          Card(key: const Key('hire-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('تأجير معدة · ${t.attributes['hire_ref'] ?? ''}', style: text.labelMedium),
+            Row(children: [Text(machineTypeLabels[t.attributes['machine_type']] ?? '${t.attributes['machine_type'] ?? ''}', style: text.titleLarge), const SizedBox(width: 8),
+              if (t.attributes['machine'] != null) Ltr('${t.attributes['machine']}', style: text.titleMedium)]),
+            if (t.shift != null) Row(children: [const Text('الدوام: '), Ltr(t.shift!, style: const TextStyle(fontWeight: FontWeight.bold))]),
+            if (t.minHours != null && t.minHours! > 0) Text('الحد الأدنى اليومي ${qtyText(t.minHours!)} ساعات'),
+            const SizedBox(height: 4),
+            const Text('سجّل عدّاد الساعات عند بدء العمل وعند انتهائه، وساعات توقف الأعطال، واسم مشرف الموقع الذي أقرّ الساعات.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isShuttle) ...[
           _ShuttleCard(t: t),
           const SizedBox(height: 12),
@@ -327,6 +339,18 @@ class _ActionsState extends State<_Actions> {
           toast(context, s.offline ? 'سُجّل الإرجاع وسيُرسل عند عودة الاتصال' : 'أُرجعت المركبة وانتهى المشوار');
           Navigator.of(context).pop();
         }
+      case TaskAction.workStart:
+      case TaskAction.workEnd:
+        final end = action == TaskAction.workEnd;
+        final r = await _meterForm(context, end: end);
+        if (r == null) return;
+        final err = end ? await s.workEnd(task.id, r.meter, downtime: r.downtime, signedBy: r.signer!) : await s.workStart(task.id, r.meter);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        if (end) {
+          toast(context, s.offline ? 'سُجّل انتهاء العمل وسيُرسل عند عودة الاتصال' : 'انتهى يوم العمل. الساعات بانتظار اعتماد المكتب');
+          Navigator.of(context).pop();
+        }
       case TaskAction.returned:
         await s.milestone(task.id, 'returned_to_sender');
         if (context.mounted) Navigator.of(context).pop();
@@ -359,6 +383,36 @@ class _ActionsState extends State<_Actions> {
               receiver: receiver ? other.text.trim() : null,
             )),
             child: Text(confirm),
+          ),
+        ]),
+      )),
+    );
+  }
+
+  /// Hired machine: the hour meter, and at the end the downtime from breakdowns and the site supervisor's name (required).
+  Future<({double meter, double downtime, String? signer})?> _meterForm(BuildContext context, {required bool end}) {
+    final m = TextEditingController(), down = TextEditingController(), who = TextEditingController();
+    bool ok() => parseMeter(m.text) != null && (!end || (who.text.trim().isNotEmpty && (down.text.trim().isEmpty || (parseMeter(down.text) ?? 99) <= 24)));
+    return showModalBottomSheet<({double meter, double downtime, String? signer})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(end ? 'انتهاء العمل' : 'بدء العمل', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          TextField(key: const Key('meter'), controller: m, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true), textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'عدّاد الساعات'), onChanged: (_) => set(() {})),
+          if (end) ...[
+            TextField(key: const Key('downtime'), controller: down, keyboardType: const TextInputType.numberWithOptions(decimal: true), textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(labelText: 'ساعات توقف بسبب عطل (إن وُجدت)'), onChanged: (_) => set(() {})),
+            TextField(key: const Key('signer'), controller: who, decoration: const InputDecoration(labelText: 'اسم مشرف الموقع'), onChanged: (_) => set(() {})),
+          ],
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('meter-save'),
+            onPressed: ok() ? () => Navigator.pop(ctx, (meter: parseMeter(m.text)!, downtime: down.text.trim().isEmpty ? 0.0 : parseMeter(down.text)!, signer: end ? who.text.trim() : null)) : null,
+            child: Text(end ? 'تأكيد الانتهاء' : 'تأكيد البدء'),
           ),
         ]),
       )),

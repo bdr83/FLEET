@@ -15,12 +15,14 @@ import { vehicleBack, vehicleOut } from '../sectors/internal/internal.controller
 import * as dist from '../sectors/distribution/distribution';
 import * as freight from '../sectors/freight/freight';
 import * as shuttle from '../sectors/shuttle/shuttle';
+import * as equipment from '../sectors/equipment/equipment';
+import { equipStage } from '../sectors/equipment/equipment.controller';
 import { markRider } from '../sectors/shuttle/shuttle.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -39,6 +41,10 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
     const c = code as freight.Stage;
     return (freight.STAGES as readonly string[]).includes(code) ? { allowed: freight.STAGE_ALLOWED[c], needs: freight.STAGE_NEEDS[c] } : null;
   }
+  if (equipment.isEquipment(pack)) {
+    const c = code as equipment.Stage;
+    return (equipment.STAGES as readonly string[]).includes(code) ? { allowed: equipment.STAGE_ALLOWED[c], needs: equipment.STAGE_NEEDS[c] } : null;
+  }
   if (concrete.isConcrete(pack)) {
     const c = code as concrete.Stage;
     return (concrete.STAGES as readonly string[]).includes(code) ? { allowed: concrete.STAGE_ALLOWED[c], needs: concrete.STAGE_NEEDS[c] } : null;
@@ -47,7 +53,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -338,7 +344,9 @@ export class DriverController {
           odometer_km: v.int(o.odometer_km, `ops[${i}].odometer_km`, 0, 10_000_000), fuel: v.int(o.fuel, `ops[${i}].fuel`, 0, 8),
           // loading and unloading (freight@1) carry the weight, the seal and the receiver's name
           weight_kg: freight.kg(o.weight_kg, `ops[${i}].weight_kg`, { zero: true }), seal_no: v.str(o.seal_no, `ops[${i}].seal_no`, { max: 40 }),
-          received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }) };
+          received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }),
+          // the hour meter and breakdown downtime of a hired machine (equipment@1)
+          meter_hours: equipment.meter(o.meter_hours, `ops[${i}].meter_hours`), downtime_hours: equipment.meter(o.downtime_hours, `ops[${i}].downtime_hours`) };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       // a rider boarded or absent on a staff-transport trip (shuttle pack)
@@ -381,7 +389,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -415,6 +423,11 @@ export class DriverController {
           }
           if (dist.isDistribution(t.sector_pack)) {
             const bad = await routeStage(c, op.task_id, op.code as dist.Stage, op.occurred_at, op.odometer_km);
+            if (bad) { reject(bad, t.status); continue; }
+          }
+          if (equipment.isEquipment(t.sector_pack)) {
+            if (op.downtime_hours !== null && op.downtime_hours > 24) { reject('meter_invalid', t.status); continue; }
+            const bad = await equipStage(c, op.task_id, op.code as equipment.Stage, { meter: op.meter_hours, downtime: op.downtime_hours, signedBy: op.received_by });
             if (bad) { reject(bad, t.status); continue; }
           }
           if (freight.isFreight(t.sector_pack)) {
@@ -633,7 +646,7 @@ export class DriverController {
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
-      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null }
+      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }

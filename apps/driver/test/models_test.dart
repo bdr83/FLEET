@@ -217,6 +217,20 @@ void main() {
     expect(failReasonsFor(t), shuttleFailReasons);
   });
 
+  test('hired machine: start and end work, labels, meter input', () {
+    final t = task('assigned', pack: 'equipment@1', attrs: {'kind': 'hire_day', 'min_hours': 8, 'machine_type': 'crane'});
+    expect((t.isEquipment, t.minHours), (true, 8.0));
+    expect(nextActions(t), [TaskAction.accept]);
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.workStart]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.workEnd, TaskAction.fail]);
+    expect(actionLabel(t, TaskAction.workEnd), 'انتهى العمل');
+    expect(failReasonsFor(t), equipmentFailReasons);
+    expect(parseMeter('1520.5'), 1520.5);
+    expect(parseMeter('١٥٢٠٫٥'), 1520.5);
+    expect(parseMeter('12.55'), isNull);
+    expect(parseMeter('-3'), isNull);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

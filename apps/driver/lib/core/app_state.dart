@@ -248,6 +248,24 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Hired machine: the operator starts work with the hour meter (checked online at once; queued offline), which starts the day.
+  Future<String?> workStart(String taskId, double meter) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_start', 'meter_hours': meter}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'in_progress', stage: 'work_start'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'in_progress'});
+    return null;
+  }
+
+  /// End of the working day: hour meter, downtime from breakdowns and the site supervisor who confirmed; ends the day.
+  Future<String?> workEnd(String taskId, double meter, {double downtime = 0, required String signedBy}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_end', 'meter_hours': meter, 'downtime_hours': downtime, 'received_by': signedBy}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'work_end'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Distribution route: the driver checked the load list (with the odometer) before leaving.
   Future<String?> loadChecked(String routeId, {int? odometerKm}) async {
     final r = await _syncOp(routeId, {'type': 'milestone', 'code': 'load_checked', 'odometer_km': ?odometerKm}, wait: true);
