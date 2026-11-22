@@ -45,6 +45,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       APP_PUBLIC_URL: https://${APP_DOMAIN}
       SMTP_URL: ${SMTP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-}
     # على خادم مشترك فيه وكيل عكسي (nginx/Traefik/Caddy) يوجّه API_DOMAIN إلى هذا المنفذ المحلي
     ports: ["127.0.0.1:${API_PORT:-3100}:3000"]
