@@ -202,6 +202,12 @@ void main() {
     });
   });
 
+  test('courier parcel line', () {
+    expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
+    expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');
+    expect(task('assigned').parcelLine, isNull);
+  });
+
   group('freight trips', () {
     DriverTask trip(String status, {String? stage}) => DriverTask(
         id: 'f', status: status, sectorPack: 'freight@1', version: 1, stage: stage,

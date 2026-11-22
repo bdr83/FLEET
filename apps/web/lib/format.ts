@@ -52,6 +52,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'delivery', sector: 1, label: 'توصيل الطلبات والمندوبين', hint: 'طلبات توصيل، تتبع للمستلم، COD، عمولات' },
   { code: 'freight', sector: 2, label: 'الشحن والنقل البري', hint: 'أوامر نقل، شاحنات ومقطورات، ناقلون من الباطن، ربح الرحلة' },
   { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد', hint: 'مسارات مبردة ومجمدة، نوافذ تسليم، قراءات حرارة، تالف وصلاحية' },
+  { code: 'courier', sector: 4, label: 'البريد والشحن السريع', hint: 'بوليصات ومحطات، مسح الباركود، محاولات التسليم، الإرجاع للمرسل' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
@@ -229,3 +230,15 @@ export const kg = (n: number | null | undefined) => (n === null || n === undefin
 /** Cold chain (coldchain pack) labels. */
 export const TEMP_CLASS: Record<string, string> = { ambient: 'عادي', chilled: 'مبرد', frozen: 'مجمد' };
 Object.assign(DIST_FAIL, { temp_out_of_range: 'الحرارة خارج النطاق', expired: 'منتهي الصلاحية', late_window: 'خارج نافذة التسليم' });
+
+/** Courier and express (courier pack) labels. Due times by service are [تخمين]. */
+export const COURIER_SERVICE: Record<string, string> = { express: 'سريع (4 ساعات)', same_day: 'نفس اليوم', next_day: 'اليوم التالي' };
+export const SCAN_EVENT: Record<string, string> = { received: 'استلام في المحطة', sorted: 'فرز', dispatched: 'إرسال من المحطة', arrived: 'وصول للمحطة', returned: 'عودة بعد محاولة', rto_out: 'تسليم للمرسل (إرجاع)' };
+export const PARCEL_WHERE: Record<string, { label: string; tone: string }> = {
+  at_hub: { label: 'في المحطة', tone: 'info' }, in_transit: { label: 'بين المحطات', tone: 'info' }, with_driver: { label: 'مع المندوب', tone: 'warning' },
+  delivered: { label: 'سُلّمت', tone: 'success' }, rto_done: { label: 'أُرجعت للمرسل', tone: 'muted' }, canceled: { label: 'ملغاة', tone: 'muted' },
+};
+export const SCAN_REJECT: Record<string, string> = {
+  unknown_awb: 'بوليصة غير معروفة', closed: 'مغلقة (سُلّمت أو أُرجعت)', with_driver: 'مع المندوب الآن', awaiting_return: 'فشلت: امسحها «عودة بعد محاولة» أولًا',
+  not_failed: 'لم تفشل محاولة لها', not_rto: 'غير مقرر إرجاعها',
+};

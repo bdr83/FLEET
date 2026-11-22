@@ -21,7 +21,7 @@ const DEFAULT_ASSIGN_HOURS = 4;
  */
 @Controller('v1/delivery')
 @UseGuards(AuthGuard)
-@Pack('delivery')
+@Pack('delivery', 'courier')
 export class DeliveryController {
   constructor(private readonly db: DbService) {}
 

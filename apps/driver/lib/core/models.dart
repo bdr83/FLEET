@@ -142,6 +142,14 @@ class DriverTask {
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
+  /// Courier pack: a delivery task with a waybill, pieces and the attempt number.
+  String? get awb => isDelivery ? attributes['awb'] as String? : null;
+  int get pieces => attributes['pieces'] is num ? (attributes['pieces'] as num).toInt() : 1;
+  int get attempt => attributes['attempt'] is num ? (attributes['attempt'] as num).toInt() : 1;
+  int? get maxAttempts => attributes['max_attempts'] is num ? (attributes['max_attempts'] as num).toInt() : null;
+  /// "2 قطع · المحاولة 2 من 3" (the attempt only from the second one); the waybill is shown on its own, left to right.
+  String? get parcelLine => awb == null ? null : ['$pieces ${pieces == 1 ? 'قطعة' : 'قطع'}', if (attempt > 1 && maxAttempts != null) 'المحاولة $attempt من $maxAttempts'].join(' · ');
+
   /// Cash to collect, in fils (3 decimals), or 0.
   int get codFils => moneyToFils(attributes['cod_amount']);
 

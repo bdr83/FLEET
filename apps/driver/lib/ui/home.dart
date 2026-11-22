@@ -242,6 +242,7 @@ class _TaskTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(t.address.isEmpty ? 'بدون عنوان' : t.address, style: Theme.of(context).textTheme.titleMedium),
               if (t.recipientName != null) Text(t.recipientName!),
+              if (t.parcelLine != null) Text(t.parcelLine!),
               if (t.isRoute) Text('${t.stopsCount} توقفات · ${t.loadList.length} أصناف'),
               if (t.isStop) Text(t.payCash ? 'نقدًا عند التسليم' : 'على الحساب'),
               if (t.isInternal && t.purpose != null) Text('${t.purpose}${t.requester != null ? ' · ${t.requester}' : ''}'),
