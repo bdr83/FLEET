@@ -111,47 +111,8 @@ export class CourierController {
   @Post('parcels')
   @Perm('tasks:write')
   book(@Auth() a: AuthContext, @Body() b: Record<string, unknown>) {
-    const le = v.uuid(b?.legal_entity_id, 'legal_entity_id', { required: true })!;
-    const customer = v.uuid(b?.customer_id, 'customer_id');
-    const service = (v.str(b?.service, 'service', { max: 20 }) ?? 'next_day') as Service;
-    if (!SERVICES.includes(service)) throw new BadRequestException(`service must be one of ${SERVICES.join(', ')}`);
-    const pieces = v.int(b?.pieces, 'pieces', 1, 999) ?? 1;
-    const weight = b?.weight_kg === undefined || b?.weight_kg === null || b?.weight_kg === '' ? null : Number(b.weight_kg);
-    if (weight !== null && (!Number.isFinite(weight) || weight <= 0 || weight > 10_000)) throw new BadRequestException('weight_kg must be 0-10000');
-    const origin = v.uuid(b?.origin_hub_id, 'origin_hub_id');
-    const dest = v.uuid(b?.dest_hub_id, 'dest_hub_id');
-    const maxAttempts = v.int(b?.max_attempts, 'max_attempts', 1, 9) ?? DEFAULT_MAX_ATTEMPTS;
-    const recipient = v.obj(b?.recipient, 'recipient');
-    const dropoff = v.obj(b?.dropoff, 'dropoff');
-    if (!recipient?.phone) throw new BadRequestException('recipient.phone required');
-    if (!dropoff?.area) throw new BadRequestException('dropoff.area required');
-    const cod = v.money(b?.cod_amount, 'cod_amount');
-    if (cod && Number(cod) > 0 && !customer) throw new BadRequestException('cash on delivery needs the shipper (customer_id)');
-    const fee = v.money(b?.delivery_fee, 'delivery_fee');
-    const awb = awbOf(b?.awb) ?? newAwb();
-    const now = new Date();
-    const due = dueAt(service, now);
-    return this.db.withTenant(a, async (c) => {
-      if (origin && !(await c.query('SELECT 1 FROM ops.courier_hub WHERE id = $1 AND active', [origin])).rowCount) throw new BadRequestException('unknown origin_hub_id');
-      if (dest && !(await c.query('SELECT 1 FROM ops.courier_hub WHERE id = $1 AND active', [dest])).rowCount) throw new BadRequestException('unknown dest_hub_id');
-      if ((await c.query('SELECT 1 FROM ops.courier_parcel WHERE awb = $1', [awb])).rowCount) throw new ConflictException('a parcel with this waybill exists');
-      const attrs: Record<string, unknown> = {
-        awb, service, pieces, ...(weight !== null ? { weight_kg: weight } : {}), attempt: 1, max_attempts: maxAttempts,
-        recipient, dropoff, ...(b?.pickup ? { pickup: v.obj(b.pickup, 'pickup') } : {}),
-        ...(cod && Number(cod) > 0 ? { cod_amount: cod } : {}), ...(fee ? { delivery_fee: fee } : {}),
-        ...(b?.notes ? { notes: v.str(b.notes, 'notes', { max: 300 }) } : {}),
-      };
-      const task = await createTask(c, a, { le, pack: DELIVERY, branch: null, ref: awb, attrs, win: { from: now.toISOString(), to: due.toISOString() }, status: 'ready', customer, site: null });
-      try {
-        await c.query(
-          `INSERT INTO ops.courier_parcel (task_id, tenant_id, legal_entity_id, awb, service, pieces, weight_kg, origin_hub_id, dest_hub_id, current_hub_id, max_attempts, due_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$8,$10,$11)`,
-          [task.id, a.tenantId, le, awb, service, pieces, weight, origin, dest, maxAttempts, due]);
-      } catch (e) { return pgToHttp(e); }
-      if (origin) await this.scanRow(c, a, task.id, origin, 'received', null);
-      await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: 'courier.parcel_booked', targetType: 'task', targetId: task.id, after: { awb, service, pieces } });
-      return this.detailOf(c, task.id);
-    });
+    const input = parseParcel(b);
+    return this.db.withTenant(a, async (c) => this.detailOf(c, await bookParcel(c, a, input)));
   }
 
   @Get('parcels')
@@ -297,9 +258,8 @@ export class CourierController {
     });
   }
 
-  private async scanRow(c: PoolClient, a: AuthContext, taskId: string, hub: string, event: ScanEvent, note: string | null) {
-    await c.query('INSERT INTO ops.courier_scan (id, tenant_id, task_id, hub_id, event, scanned_by, note) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [randomUUID(), a.tenantId, taskId, hub, event, a.userId, note]);
+  private scanRow(c: PoolClient, a: AuthContext, taskId: string, hub: string, event: ScanEvent, note: string | null) {
+    return scanRow(c, a, taskId, hub, event, note);
   }
 
   private async detailOf(c: PoolClient, id: string) {
@@ -315,4 +275,64 @@ export class CourierController {
     const link = (await c.query('SELECT token FROM ops.delivery_link WHERE task_id = $1', [id])).rows[0];
     return { ...withWhere(p), scans, events, track_token: link?.token ?? null };
   }
+}
+
+async function scanRow(c: PoolClient, a: AuthContext, taskId: string, hub: string, event: ScanEvent, note: string | null) {
+  await c.query('INSERT INTO ops.courier_scan (id, tenant_id, task_id, hub_id, event, scanned_by, note) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [randomUUID(), a.tenantId, taskId, hub, event, a.userId || null, note]);
+}
+
+export interface ParcelInput {
+  le: string; customer: string | null; service: Service; pieces: number; weight: number | null; origin: string | null; dest: string | null; maxAttempts: number;
+  recipient: Record<string, unknown>; dropoff: Record<string, unknown>; pickup: Record<string, unknown> | null; cod: string | null; fee: string | null; notes: string | null; awb: string | null;
+  extra?: Record<string, unknown>;
+}
+
+/** Validates a parcel booking (office form, or a merchant order through the e-commerce API). */
+export function parseParcel(b: Record<string, unknown>): ParcelInput {
+  const le = v.uuid(b?.legal_entity_id, 'legal_entity_id', { required: true })!;
+  const customer = v.uuid(b?.customer_id, 'customer_id');
+  const service = (v.str(b?.service, 'service', { max: 20 }) ?? 'next_day') as Service;
+  if (!SERVICES.includes(service)) throw new BadRequestException(`service must be one of ${SERVICES.join(', ')}`);
+  const pieces = v.int(b?.pieces, 'pieces', 1, 999) ?? 1;
+  const weight = b?.weight_kg === undefined || b?.weight_kg === null || b?.weight_kg === '' ? null : Number(b.weight_kg);
+  if (weight !== null && (!Number.isFinite(weight) || weight <= 0 || weight > 10_000)) throw new BadRequestException('weight_kg must be 0-10000');
+  const recipient = v.obj(b?.recipient, 'recipient');
+  const dropoff = v.obj(b?.dropoff, 'dropoff');
+  if (!recipient?.phone) throw new BadRequestException('recipient.phone required');
+  if (!dropoff?.area) throw new BadRequestException('dropoff.area required');
+  const cod = v.money(b?.cod_amount, 'cod_amount');
+  if (cod && Number(cod) > 0 && !customer) throw new BadRequestException('cash on delivery needs the shipper (customer_id)');
+  return {
+    le, customer, service, pieces, weight, recipient, dropoff, cod: cod && Number(cod) > 0 ? cod : null,
+    origin: v.uuid(b?.origin_hub_id, 'origin_hub_id'), dest: v.uuid(b?.dest_hub_id, 'dest_hub_id'),
+    maxAttempts: v.int(b?.max_attempts, 'max_attempts', 1, 9) ?? DEFAULT_MAX_ATTEMPTS,
+    pickup: b?.pickup ? v.obj(b.pickup, 'pickup') : null, fee: v.money(b?.delivery_fee, 'delivery_fee'),
+    notes: b?.notes ? v.str(b.notes, 'notes', { max: 300 }) : null, awb: awbOf(b?.awb),
+  };
+}
+
+/** Books a parcel inside the caller's transaction and returns its task id. */
+export async function bookParcel(c: PoolClient, a: AuthContext, p: ParcelInput): Promise<string> {
+  const awb = p.awb ?? newAwb();
+  const now = new Date();
+  const due = dueAt(p.service, now);
+  if (p.origin && !(await c.query('SELECT 1 FROM ops.courier_hub WHERE id = $1 AND active', [p.origin])).rowCount) throw new BadRequestException('unknown origin_hub_id');
+  if (p.dest && !(await c.query('SELECT 1 FROM ops.courier_hub WHERE id = $1 AND active', [p.dest])).rowCount) throw new BadRequestException('unknown dest_hub_id');
+  if ((await c.query('SELECT 1 FROM ops.courier_parcel WHERE awb = $1', [awb])).rowCount) throw new ConflictException('a parcel with this waybill exists');
+  const attrs: Record<string, unknown> = {
+    ...(p.extra ?? {}), awb, service: p.service, pieces: p.pieces, ...(p.weight !== null ? { weight_kg: p.weight } : {}), attempt: 1, max_attempts: p.maxAttempts,
+    recipient: p.recipient, dropoff: p.dropoff, ...(p.pickup ? { pickup: p.pickup } : {}),
+    ...(p.cod ? { cod_amount: p.cod } : {}), ...(p.fee ? { delivery_fee: p.fee } : {}), ...(p.notes ? { notes: p.notes } : {}),
+  };
+  const task = await createTask(c, a, { le: p.le, pack: DELIVERY, branch: null, ref: awb, attrs, win: { from: now.toISOString(), to: due.toISOString() }, status: 'ready', customer: p.customer, site: null });
+  try {
+    await c.query(
+      `INSERT INTO ops.courier_parcel (task_id, tenant_id, legal_entity_id, awb, service, pieces, weight_kg, origin_hub_id, dest_hub_id, current_hub_id, max_attempts, due_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$8,$10,$11)`,
+      [task.id, a.tenantId, p.le, awb, p.service, p.pieces, p.weight, p.origin, p.dest, p.maxAttempts, due]);
+  } catch (e) { return pgToHttp(e); }
+  if (p.origin) await scanRow(c, a, task.id, p.origin, 'received', null);
+  await audit(c, { tenantId: a.tenantId, actorId: a.userId || null, actorType: a.customerId ? 'customer' : 'user', action: 'courier.parcel_booked', targetType: 'task', targetId: task.id, after: { awb, service: p.service, pieces: p.pieces } });
+  return task.id;
 }
