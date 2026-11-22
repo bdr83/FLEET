@@ -1,0 +1,16 @@
+# خادم مشترك فيه nginx موجود في حاوية: يضم الخادم واللوحة إلى شبكة ذلك الـ nginx باسمين ثابتين،
+# فيصل إليهما بـ http://fleet-api:3000 و http://fleet-web:3001. التفعيل في .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.shared.yml   و   EDGE_NETWORK=<اسم الشبكة>
+services:
+  api:
+    networks:
+      default: {}
+      edge: { aliases: [fleet-api] }
+  web:
+    networks:
+      default: {}
+      edge: { aliases: [fleet-web] }
+networks:
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:?set EDGE_NETWORK}
