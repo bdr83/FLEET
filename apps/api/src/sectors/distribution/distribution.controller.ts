@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
-import { AuthContext, AuthGuard, Perm } from '../../auth/auth.guard';
+import { AuthContext, AuthGuard, Perm, Pack } from '../../auth/auth.guard';
 import { Auth } from '../../auth/auth.decorator';
 import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
@@ -37,6 +37,7 @@ interface StopIn { name: string; customer_id: string | null; address: string | n
 
 @Controller('v1/distribution')
 @UseGuards(AuthGuard)
+@Pack('distribution')
 export class DistributionController {
   constructor(private readonly db: DbService) {}
 

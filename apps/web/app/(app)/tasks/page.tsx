@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { dt, PACKS, packLabel, taskSummary, TASK_STATUS, todayKw } from '@/lib/format';
+import { dt, enabledPacks, packLabel, taskSummary, TASK_STATUS, todayKw } from '@/lib/format';
 import { can, useMe } from '@/components/me';
 import { Empty, ErrorBox, Modal, StatusBadge, useAction, useLoad } from '@/components/ui';
 
@@ -78,7 +78,7 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
     : Promise.resolve([]));
   const today = todayKw();
   const [f, setF] = useState({
-    legal_entity_id: me.legal_entities[0]?.id ?? '', sector_pack: 'delivery@1', ref: '', customer_id: '',
+    legal_entity_id: me.legal_entities[0]?.id ?? '', sector_pack: enabledPacks(me.packs)[0]?.[0] ?? 'delivery@1', ref: '', customer_id: '',
     from: `${today}T09:00`, to: `${today}T13:00`, address: '', recipient_name: '', recipient_phone: '', notes: '', draft: false,
     area: '', block: '', street: '', avenue: '', house: '', cod_amount: '', delivery_fee: '',
   });
@@ -130,7 +130,7 @@ function CreateTask({ onClose, onDone }: { onClose: () => void; onDone: (id: str
           )}
           <label className="field">نوع العمل
             <select name="sector_pack" value={f.sector_pack} onChange={set('sector_pack')}>
-              {Object.entries(PACKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              {enabledPacks(me.packs).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </select>
           </label>
           <label className="field">{delivery ? 'رقم الطلب الخارجي (يمنع التكرار)' : 'المرجع (اختياري)'}<input name="ref" value={f.ref} onChange={set('ref')} maxLength={60} /></label>

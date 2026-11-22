@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
-import { AuthContext, AuthGuard, Perm } from '../../auth/auth.guard';
+import { AuthContext, AuthGuard, Perm, Pack } from '../../auth/auth.guard';
 import { Auth } from '../../auth/auth.decorator';
 import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
@@ -32,6 +32,7 @@ const odo = (val: unknown, f: string) => v.int(val, f, 0, 9_999_999) ?? (() => {
 
 @Controller('v1/internal')
 @UseGuards(AuthGuard)
+@Pack('internal')
 export class InternalController {
   constructor(private readonly db: DbService) {}
 

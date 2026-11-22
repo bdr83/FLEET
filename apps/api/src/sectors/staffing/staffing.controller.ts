@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
-import { AuthContext, AuthGuard, Perm } from '../../auth/auth.guard';
+import { AuthContext, AuthGuard, Perm, Pack } from '../../auth/auth.guard';
 import { Auth } from '../../auth/auth.decorator';
 import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
@@ -48,6 +48,7 @@ const today = (c: PoolClient, le: string) => c.query(`SELECT (now() AT TIME ZONE
  */
 @Controller('v1/staffing')
 @UseGuards(AuthGuard)
+@Pack('staffing')
 export class StaffingController {
   constructor(private readonly db: DbService) {}
 

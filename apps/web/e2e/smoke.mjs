@@ -30,6 +30,7 @@ try {
   await page.fill('input[name=password]', 'smoke-password-1');
   await page.click('button:has-text("إنشاء الحساب")');
   await page.fill('input[name=company]', 'شركة اختبار المتصفح');
+  for (const c of await page.locator('input[name^=pack-]').all()) await c.check();
   await shot(page, '01-onboard');
   await page.click('button:has-text("إنشاء الشركة")');
   await page.waitForURL(/\/tasks$/);

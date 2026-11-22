@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
-import { AuthContext, AuthGuard, Perm } from '../../auth/auth.guard';
+import { AuthContext, AuthGuard, Perm, Pack } from '../../auth/auth.guard';
 import { Auth } from '../../auth/auth.decorator';
 import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
@@ -21,6 +21,7 @@ const DEFAULT_ASSIGN_HOURS = 4;
  */
 @Controller('v1/delivery')
 @UseGuards(AuthGuard)
+@Pack('delivery')
 export class DeliveryController {
   constructor(private readonly db: DbService) {}
 

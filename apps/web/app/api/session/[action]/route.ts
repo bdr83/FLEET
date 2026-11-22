@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ action: st
       if (!ut) return NextResponse.json({ message: 'login expired' }, { status: 401 });
       const r = action === 'select'
         ? await callApi('/v1/auth/token', { method: 'POST', token: ut, body: { tenant_id: body.tenant_id } })
-        : await callApi('/v1/tenants', { method: 'POST', token: ut, body: { name: body.name, country: body.country } });
+        : await callApi('/v1/tenants', { method: 'POST', token: ut, body: { name: body.name, country: body.country, packs: body.packs } });
       if (!r.ok) return pass(r);
       const data = await r.json();
       const res = NextResponse.json({ ok: true });

@@ -45,6 +45,7 @@ try {
   const owner = `+9655${stamp}`;
   await login(owner);
   await page.fill('input[name=company]', 'توريد الخليج');
+  for (const c of await page.locator('input[name^=pack-]').all()) await c.check();
   await page.click('button:has-text("إنشاء الشركة")');
   await page.waitForURL(`${WEB}/`);
   const me = await call('GET', '/me');
