@@ -2,7 +2,8 @@ name: deploy
 # النشر إلى خادم التجربة بضغطة زر: Actions → deploy → Run workflow.
 # الإعداد مرة واحدة في Settings → Secrets and variables → Actions:
 #   Secrets:   DEPLOY_HOST (عنوان IP)، DEPLOY_SSH_KEY (مفتاح SSH خاص)، SMS_HTTP_URL، SMS_HTTP_HEADERS، SMS_HTTP_BODY
-#   Variables: APP_DOMAIN، API_DOMAIN، DEPLOY_USER (افتراضيًا root)، SMS_HTTP_FORM (اختياري)،
+#   Variables: SERVER_ENV (أسطر KEY=VALUE تغني عن البقية)، أو منفصلة: APP_DOMAIN، API_DOMAIN، DEPLOY_USER (افتراضيًا root)، SMS_HTTP_FORM (اختياري)،
+#              COMPOSE_FILE، EDGE_NETWORK، NGINX_CONTAINER، NGINX_CONF، ACME_WEBROOT، ACME_WEBROOT_IN (خادم مشترك فيه nginx)
 #              COMPOSE_PROFILES (caddy لخادم مخصص، فارغ لخادم مشترك خلف وكيل موجود)، API_PORT/WEB_PORT، MANAGE_FIREWALL (1 لخادم مخصص)
 # أسرار قاعدة البيانات والجلسات تُولَّد على الخادم نفسه أول مرة ولا تمر بـ GitHub.
 on:
@@ -12,6 +13,10 @@ on:
         description: وسم الصور (latest أو رقم التزام)
         default: latest
         required: true
+      proxy_setup:
+        description: إضافة النطاقين إلى nginx الموجود على الخادم المشترك (أول مرة)
+        type: boolean
+        default: false
 permissions:
   contents: read
   packages: read
@@ -41,23 +46,35 @@ jobs:
           COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES }}
           API_PORT: ${{ vars.API_PORT }}
           WEB_PORT: ${{ vars.WEB_PORT }}
+          COMPOSE_FILE: ${{ vars.COMPOSE_FILE }}
+          EDGE_NETWORK: ${{ vars.EDGE_NETWORK }}
+          NGINX_CONTAINER: ${{ vars.NGINX_CONTAINER }}
+          NGINX_CONF: ${{ vars.NGINX_CONF }}
+          ACME_WEBROOT: ${{ vars.ACME_WEBROOT }}
+          ACME_WEBROOT_IN: ${{ vars.ACME_WEBROOT_IN }}
+          SERVER_ENV: ${{ vars.SERVER_ENV }}
         run: |
-          test -n "$APP_DOMAIN" && test -n "$API_DOMAIN" || { echo "APP_DOMAIN and API_DOMAIN variables are required"; exit 1; }
+          for k in APP_DOMAIN API_DOMAIN; do
+            [ -n "${!k}" ] || printf '%s\n' "$SERVER_ENV" | grep -q "^$k=" || { echo "$k is required (variable or SERVER_ENV line)"; exit 1; }
+          done
           umask 077
           {
-            echo "APP_DOMAIN=$APP_DOMAIN"; echo "API_DOMAIN=$API_DOMAIN"
+            echo "APP_DOMAIN=$APP_DOMAIN"; echo "API_DOMAIN=$API_DOMAIN"   # empty values are ignored on the server
             if [ -n "$SMS_HTTP_URL" ]; then echo "SMS_PROVIDER=http"; fi
             echo "SMS_HTTP_URL=$SMS_HTTP_URL"; echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"
             echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"; echo "SMS_HTTP_FORM=$SMS_HTTP_FORM"
             echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:-none}"; echo "API_PORT=$API_PORT"; echo "WEB_PORT=$WEB_PORT"
+            for k in COMPOSE_FILE EDGE_NETWORK NGINX_CONTAINER NGINX_CONF ACME_WEBROOT ACME_WEBROOT_IN; do echo "$k=${!k}"; done
+            # SERVER_ENV: متغير واحد متعدد الأسطر KEY=VALUE يغني عن المتغيرات المنفصلة (يُطبَّق أخيرًا)
+            printf '%s\n' "$SERVER_ENV" | grep -E '^[A-Z_][A-Z0-9_]*=' || true
           } > deploy/config.env
       - name: Copy deploy files
         run: |
           ssh -i ~/.ssh/id "$USER_@$HOST" 'mkdir -p /opt/fleet/deploy'
-          scp -i ~/.ssh/id deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/backup.sh deploy/restore.sh deploy/update.sh deploy/remote.sh deploy/config.env "$USER_@$HOST:/opt/fleet/deploy/"
+          scp -i ~/.ssh/id deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/backup.sh deploy/restore.sh deploy/update.sh deploy/remote.sh deploy/nginx-shared.sh deploy/docker-compose.shared.yml deploy/config.env "$USER_@$HOST:/opt/fleet/deploy/"
       - name: Pull and start
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
         run: |
-          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/id "$USER_@$HOST" "cd /opt/fleet/deploy && GHCR_USER='${{ github.actor }}' TAG='$TAG' MANAGE_FIREWALL='${{ vars.MANAGE_FIREWALL }}' bash ./remote.sh"
+          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/id "$USER_@$HOST" "cd /opt/fleet/deploy && GHCR_USER='${{ github.actor }}' TAG='$TAG' MANAGE_FIREWALL='${{ vars.MANAGE_FIREWALL }}' PROXY_SETUP='${{ inputs.proxy_setup && '1' || '0' }}' bash ./remote.sh"

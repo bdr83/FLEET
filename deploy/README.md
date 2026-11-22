@@ -49,6 +49,14 @@ crontab -e   # يوميًا 02:15 UTC
 
 النسخ تُحفظ 14 يومًا في `deploy/backups`. [تحقق محلي] انسخها يوميًا إلى تخزين خارج الخادم في المنطقة نفسها، وجرّب الاستعادة على خادم آخر مرة شهريًا.
 
+## خادم مشترك فيه nginx موجود (مثل خادم Hostinger الحالي)
+
+لا يُشغَّل Caddy (`COMPOSE_PROFILES=none`)، ويُضم الخادم واللوحة إلى شبكة الـ nginx الموجود (`docker-compose.shared.yml`) باسمي `fleet-api` و`fleet-web`. تشغيل workflow ‏deploy مع خيار **proxy_setup** مرة واحدة ينفّذ `nginx-shared.sh`: نسخة احتياطية من ملف إعداد nginx، كتلة المنفذ 80 لتحدي ACME، شهادة Let's Encrypt بطريقة webroot، ثم كتلتا HTTPS، مع `nginx -t` قبل كل إعادة تحميل والرجوع للنسخة الاحتياطية عند الفشل. الكتل محصورة بين علامتي `fleet-begin` و`fleet-end` فلا تتكرر. وتوقّف المنصة لا يمنع nginx من الإقلاع (العنوان يُحَل وقت الطلب).
+
+متغيرات GitHub لهذا الوضع: `COMPOSE_PROFILES=none`، `COMPOSE_FILE=docker-compose.yml:docker-compose.shared.yml`، `EDGE_NETWORK`، `NGINX_CONTAINER`، `NGINX_CONF`، `ACME_WEBROOT`، `ACME_WEBROOT_IN`.
+
+[تحقق محلي] جُرّب مع nginx 1.27 في حاوية: الموقع الآخر يبقى يعمل، والمنصة تعمل بـ HTTPS عبره، والتكرار لا يضاعف الكتل، وإعداد خاطئ يُرجَع تلقائيًا.
+
 ## تطبيق السائق
 
 في إعدادات المستودع على GitHub (Settings → Secrets and variables → Actions → Variables) أضف `DRIVER_API_URL=https://api.<النطاق>`، ثم شغّل workflow ‏driver-app يدويًا لبناء APK يتصل بالخادم.

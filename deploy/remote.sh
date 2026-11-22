@@ -55,6 +55,14 @@ docker compose pull --quiet
 docker compose up -d --remove-orphans
 docker image prune -f >/dev/null
 
+# خادم مشترك: إضافة النطاقين إلى nginx الموجود (مرة عند الطلب، PROXY_SETUP=1)
+if [ "${PROXY_SETUP:-0}" = 1 ]; then
+  for k in APP_DOMAIN API_DOMAIN NGINX_CONTAINER NGINX_CONF ACME_WEBROOT ACME_WEBROOT_IN; do
+    export "$k=$(grep "^$k=" .env | head -1 | cut -d= -f2-)"
+  done
+  ./nginx-shared.sh
+fi
+
 api=$(grep '^API_DOMAIN=' .env | cut -d= -f2)
 port=$(grep '^API_PORT=' .env | cut -d= -f2); port=${port:-3100}
 if grep -q '^COMPOSE_PROFILES=.*caddy' .env; then url="https://$api/health"; else url="http://127.0.0.1:$port/health"; fi
