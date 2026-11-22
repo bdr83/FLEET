@@ -1,5 +1,6 @@
 name: driver-app
 on:
+  workflow_dispatch:
   push:
     paths: ['apps/driver/**', '.github/workflows/driver-app.yml']
   pull_request:
