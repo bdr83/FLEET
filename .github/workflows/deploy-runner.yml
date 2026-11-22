@@ -1,0 +1,46 @@
+name: deploy-runner
+# النشر عبر GitHub runner مثبّت على الخادم نفسه (deploy/install-runner.sh): لا SSH ولا مفتاح خاص.
+# Actions → deploy-runner → Run workflow. الإعدادات من المتغير SERVER_ENV (أسطر KEY=VALUE).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: وسم الصور (latest أو رقم التزام)
+        default: latest
+        required: true
+      proxy_setup:
+        description: إضافة النطاقين إلى nginx الموجود على الخادم المشترك (أول مرة)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  packages: read
+concurrency: deploy
+jobs:
+  deploy:
+    runs-on: [self-hosted, fleet-pilot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Settings and files
+        env:
+          SERVER_ENV: ${{ vars.SERVER_ENV }}
+          SMS_HTTP_URL: ${{ secrets.SMS_HTTP_URL }}
+          SMS_HTTP_HEADERS: ${{ secrets.SMS_HTTP_HEADERS }}
+          SMS_HTTP_BODY: ${{ secrets.SMS_HTTP_BODY }}
+        run: |
+          printf '%s\n' "$SERVER_ENV" | grep -q '^APP_DOMAIN=' || { echo "SERVER_ENV must contain APP_DOMAIN and API_DOMAIN"; exit 1; }
+          mkdir -p /opt/fleet/deploy
+          cp deploy/docker-compose.yml deploy/docker-compose.shared.yml deploy/Caddyfile deploy/.env.example \
+             deploy/backup.sh deploy/restore.sh deploy/update.sh deploy/remote.sh deploy/nginx-shared.sh /opt/fleet/deploy/
+          umask 077
+          {
+            printf '%s\n' "$SERVER_ENV" | grep -E '^[A-Z_][A-Z0-9_]*=' || true
+            if [ -n "$SMS_HTTP_URL" ]; then echo "SMS_PROVIDER=http"; echo "SMS_HTTP_URL=$SMS_HTTP_URL"; fi
+            echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"; echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"
+          } > /opt/fleet/deploy/config.env
+      - name: Pull and start
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd /opt/fleet/deploy
+          printf '%s\n' "$TOKEN" | GHCR_USER='${{ github.actor }}' TAG='${{ inputs.tag }}' PROXY_SETUP='${{ inputs.proxy_setup && '1' || '0' }}' bash ./remote.sh
