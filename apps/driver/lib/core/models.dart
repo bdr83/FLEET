@@ -98,6 +98,9 @@ class DriverTask {
   bool get isDelivery => sectorPack == 'delivery@1';
   /// A staff-transport trip (shuttle pack): stops with times and the riders to mark boarded or absent.
   bool get isShuttle => sectorPack == 'shuttle@1';
+  /// A working day of a hired machine (equipment pack): hour meter at the start and end, downtime and the site supervisor.
+  bool get isEquipment => sectorPack == 'equipment@1';
+  double? get minHours => _num(attributes['min_hours']);
   List<ShuttleStop> get shuttleStops => [for (final x in (attributes['stops'] as List? ?? const [])) if (x is Map) ShuttleStop.fromJson(Map<String, dynamic>.from(x))];
   List<Rider> get riders => [for (final x in (shuttle?['riders'] as List? ?? const [])) if (x is Map) Rider.fromJson(Map<String, dynamic>.from(x))];
   int get boardedCount => riders.where((r) => r.event == 'boarded').length;
@@ -224,13 +227,14 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
   if (t.isFreight) return _freightActions(t);
   if (t.isStaffing) return _staffingActions(t, now ?? DateTime.now());
   if (t.isInternal) return _internalActions(t);
+  if (t.isEquipment) return _equipmentActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -322,6 +326,20 @@ List<TaskAction> _internalActions(DriverTask t) {
   }
 }
 
+/// Hired machine: accept → start work (hour meter) → end work (meter, downtime, supervisor; ends the day).
+List<TaskAction> _equipmentActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.workStart];
+    case 'in_progress':
+      return [TaskAction.workEnd, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
 /// Distribution route: accept → check the load (odometer) → leave the depot → (stops) → back at the depot (odometer) → done.
 List<TaskAction> _routeActions(DriverTask t) {
   switch (t.status) {
@@ -349,7 +367,37 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                 ? (distActionLabels[a] ?? actionLabels[a]!)
                 : t.isShuttle
                     ? (shuttleActionLabels[a] ?? actionLabels[a]!)
-                    : actionLabels[a]!;
+                    : t.isEquipment
+                        ? (equipmentActionLabels[a] ?? actionLabels[a]!)
+                        : actionLabels[a]!;
+
+const equipmentActionLabels = {
+  TaskAction.accept: 'قبول يوم العمل',
+  TaskAction.workStart: 'بدأت العمل',
+  TaskAction.workEnd: 'انتهى العمل',
+  TaskAction.fail: 'تعذّر العمل اليوم',
+};
+
+/// Same codes as the API (equipment FAIL_REASONS).
+const equipmentFailReasons = {
+  'equipment_breakdown': 'عطل في المعدة',
+  'site_not_ready': 'الموقع غير جاهز',
+  'weather': 'الطقس',
+  'customer_canceled': 'ألغى العميل',
+  'other': 'سبب آخر',
+};
+
+const machineTypeLabels = {'excavator': 'حفارة', 'loader': 'شيول', 'crane': 'رافعة (كرين)', 'forklift': 'رافعة شوكية', 'bulldozer': 'بلدوزر', 'roller': 'مدحلة', 'grader': 'جريدر'};
+
+/// An hour-meter reading typed by the operator: hours with up to one decimal (Arabic digits and comma accepted).
+double? parseMeter(String s) {
+  final t = s.trim().replaceAll('٫', '.').replaceAll(',', '.').split('').map((c) {
+    final i = '٠١٢٣٤٥٦٧٨٩'.indexOf(c);
+    return i >= 0 ? '$i' : c;
+  }).join();
+  if (!RegExp(r'^\d{1,7}(\.\d)?$').hasMatch(t)) return null;
+  return double.parse(t);
+}
 
 const shuttleActionLabels = {
   TaskAction.accept: 'قبول الرحلة',
@@ -519,7 +567,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -597,6 +645,10 @@ const rejectReasons = {
   'item_not_planned': 'صنف غير مخطط لهذا التوقف',
   'cash_required': 'أدخل المبلغ المحصّل',
   'unknown_rider': 'الراكب ليس على هذا الخط، حدّث القائمة',
+  'meter_required': 'أدخل قراءة عدّاد الساعات',
+  'meter_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمعدة',
+  'meter_invalid': 'قراءة الانتهاء يجب أن تكون بعد قراءة البدء وخلال 24 ساعة',
+  'signer_required': 'اكتب اسم مشرف الموقع',
 };
 
 const tempClassLabels = {'chilled': 'مبرد', 'frozen': 'مجمد', 'ambient': 'عادي'};

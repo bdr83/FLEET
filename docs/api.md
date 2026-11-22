@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -431,3 +431,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | لكل عميل: الرحلات والمنفذة والملغاة، الانطلاق في الموعد، الركاب، الغياب، إشغال المقاعد |
 
 السائق: تحمل `GET /v1/driver/tasks` حقل `shuttle {trip_id, riders[{id, name, staff_no, stop_seq, event}]}`. وفي `POST /v1/driver/sync` عملية جديدة `{type: 'board', task_id, rider_id, event}` تُقبل بعد قبول الرحلة وحتى انتهائها.
+
+## قطاع تأجير المعدات الثقيلة equipment (القطاع 16)
+
+عقد التأجير يؤجّر معدة ثقيلة (رافعة، حفارة، شيول، رافعة شوكية، بلدوزر، مدحلة، جريدر) لعميل في موقعه، بمشغّل من عندنا (تأجير بمشغّل) أو بدونه (تأجير جاف)، بالساعة أو اليوم أو الشهر، مع حد أدنى يومي للساعات (الافتراضي 8 [تخمين]). كل يوم عمل في العقد (الافتراضي كل الأيام عدا الجمعة [تخمين]) مهمة `equipment@1`. في التأجير بمشغّل تحجز المهمة المعدة والمشغّل حصريًا لنافذة الدوام. المعدة لا تدخل عقدين متداخلين. المشغّل يسجّل عدّاد الساعات عند البدء والانتهاء، وساعات التوقف بسبب عطل من عندنا، واسم مشرف الموقع. المكتب يعتمد اليوم: الساعات المفوترة = الأكبر بين الساعات الفعلية والحد الأدنى ناقص ساعات العطل. سعر اليوم أو الشهر يحسب الدوام كاملًا ناقص العطل. السعر من عقد العميل.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/equipment/hires` | `{legal_entity_id, customer_id, asset_id, operator_worker_id?, site{name?, area?, lat?, lng?, contact?, phone?}, starts_on, ends_on, shift_start, shift_end, work_days[], rate_unit hour\|day\|month, min_hours?, notes?}`. المدة 186 يومًا كحد أقصى. 409 إذا كانت المعدة أو المشغّل محجوزين |
+| `GET /hires/:id` | العقد مع `work_days_list` (لكل يوم: المهمة والحالة والقراءات والساعات المعتمدة) |
+| `POST /hires/:id/extend` | `{ends_on}` بعد النهاية الحالية |
+| `POST /hires/:id/off-hire` | `{on, reason}` إنهاء مبكر، وتُلغى الأيام بعده |
+| `POST /hires/:id/cancel` | `{reason}` قبل بدء أي يوم |
+| `GET /days?date` | أيام العمل بقراءات العدّاد |
+| `POST /days/:taskId/record` | تسجيل المكتب في التأجير الجاف أو تصحيحه `{meter_start, meter_end, downtime_hours?, signed_by?}` |
+| `POST /days/:taskId/approve` | اعتماد الساعات المفوترة. اليوم المعتمد مقفل |
+| `GET /fleet` | المعدات الثقيلة مع العقد الحالي |
+| `GET /exceptions?date` | تأخر البدء أكثر من 30 دقيقة [تخمين]، أيام بلا مشغّل، أيام تنتظر الاعتماد، أيام بلا توقيع مشرف، عقود تنتهي خلال 3 أيام |
+| `GET /report?from&to` | لكل عميل: الأيام والمعتمد والساعات الفعلية والتوقف والمفوتر. لكل معدة: نسبة الاستخدام |
+
+المشغّل: مهمة `equipment@1` تحمل في `attributes` الحقول `hire_ref`، `machine_type`، `min_hours`، `work_date`. محطتا `work_start` و`work_end` في `POST /v1/driver/sync` تحتاجان `meter_hours`. وتقبل `work_end` أيضًا `downtime_hours` و`received_by` (مشرف الموقع، إلزامي). رموز الرفض: `meter_required`، `meter_too_low`، `meter_invalid`، `signer_required`.

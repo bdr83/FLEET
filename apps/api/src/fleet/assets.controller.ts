@@ -6,7 +6,7 @@ import { pgToHttp, v } from '../common/validate';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 
-export const ASSET_TYPES = ['car', 'motorbike', 'van', 'pickup', 'truck', 'mixer', 'pump', 'trailer', 'bus', 'other'] as const;
+export const ASSET_TYPES = ['car', 'motorbike', 'van', 'pickup', 'truck', 'mixer', 'pump', 'trailer', 'bus', 'excavator', 'loader', 'crane', 'forklift', 'bulldozer', 'roller', 'grader', 'other'] as const;
 export const ASSET_STATUSES = ['available', 'in_use', 'out_of_service', 'retired'] as const;
 const COLS = `id, legal_entity_id, branch_id, asset_type, plate_no, status, make, model, year, vin, odometer_km, capacity, notes, created_at`;
 
