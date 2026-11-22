@@ -266,6 +266,16 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Rental car: handed over to the renter (odometer, fuel, the renter's name) or taken back; checked online at once, then ends the task.
+  Future<String?> rentalStep(String taskId, {required bool collect, required int odometerKm, int? fuel, String? receivedBy}) async {
+    final code = collect ? 'collected' : 'handover';
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': code, 'odometer_km': odometerKm, 'fuel': ?fuel, 'received_by': ?receivedBy}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: code));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Distribution route: the driver checked the load list (with the odometer) before leaving.
   Future<String?> loadChecked(String routeId, {int? odometerKm}) async {
     final r = await _syncOp(routeId, {'type': 'milestone', 'code': 'load_checked', 'odometer_km': ?odometerKm}, wait: true);
