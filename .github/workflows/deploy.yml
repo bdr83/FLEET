@@ -71,7 +71,7 @@ jobs:
           SERVER_ENV: ${{ vars.SERVER_ENV }}
         run: |
           for k in APP_DOMAIN API_DOMAIN; do
-            [ -n "${!k}" ] || printf '%s\n' "$SERVER_ENV" | grep -q "^$k=" || { echo "$k is required (variable or SERVER_ENV line)"; exit 1; }
+            [ -n "${!k}" ] || printf '%s\n' "$SERVER_ENV" | tr -d '\r' | grep -q "^$k=" || { echo "$k is required (variable or SERVER_ENV line)"; exit 1; }
           done
           umask 077
           {
@@ -82,7 +82,7 @@ jobs:
             echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:-none}"; echo "API_PORT=$API_PORT"; echo "WEB_PORT=$WEB_PORT"
             for k in COMPOSE_FILE EDGE_NETWORK NGINX_CONTAINER NGINX_CONF ACME_WEBROOT ACME_WEBROOT_IN; do echo "$k=${!k}"; done
             # SERVER_ENV: متغير واحد متعدد الأسطر KEY=VALUE يغني عن المتغيرات المنفصلة (يُطبَّق أخيرًا)
-            printf '%s\n' "$SERVER_ENV" | grep -E '^[A-Z_][A-Z0-9_]*=' || true
+            printf '%s\n' "$SERVER_ENV" | tr -d '\r' | grep -E '^[A-Z_][A-Z0-9_]*=' || true
           } > deploy/config.env
       - name: Copy deploy files
         run: |

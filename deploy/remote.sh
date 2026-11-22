@@ -35,8 +35,11 @@ set_kv() { # key value: replace the line or append it; value is taken literally
   local k="$1" v="$2" tmp; tmp=$(mktemp)
   awk -v k="$k" -v v="$v" 'BEGIN{d=0} index($0, k"=")==1 {print k"="v; d=1; next} {print} END{if(!d) print k"="v}' .env > "$tmp" && cat "$tmp" > .env && rm -f "$tmp"
 }
+# متغيرات GitHub الملصوقة من متصفح ويندوز تحمل \r في نهاية الأسطر: نحذفها هنا ومن .env
+sed -i 's/\r$//' .env
 if [ -f config.env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}
     [ -z "$line" ] && continue
     k="${line%%=*}"; v="${line#*=}"
     [ -n "$v" ] && set_kv "$k" "$v"
