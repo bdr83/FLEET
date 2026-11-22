@@ -1,8 +1,9 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ForbiddenException, BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
 import { AuthGuard, AuthContext, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
+import { packOf } from '../common/packs';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { pgToHttp, v } from '../common/validate';
@@ -85,6 +86,8 @@ export class TasksController {
   async create(@Auth() a: AuthContext, @Body() b: Record<string, unknown>) {
     const le = v.uuid(b?.legal_entity_id, 'legal_entity_id', { required: true });
     const pack = v.str(b?.sector_pack, 'sector_pack', { required: true, max: 40 });
+    const packCode = packOf(pack!);
+    if (packCode && !a.packs.includes(packCode)) throw new ForbiddenException('pack_disabled');
     const branch = v.uuid(b?.branch_id, 'branch_id');
     const ref = v.str(b?.ref, 'ref', { max: 60 });
     const attrs = v.obj(b?.attributes, 'attributes');

@@ -3,19 +3,19 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, ApiError, session } from '@/lib/api';
-import { can, Me, MeContext } from '@/components/me';
+import { can, hasPack, Me, MeContext } from '@/components/me';
 import { ROLE } from '@/lib/format';
 
-const NAV: { sec?: string; href?: string; label?: string; perm?: string }[] = [
+const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: string }[] = [
   { sec: 'العمليات' },
   { href: '/', label: 'لوحة التوزيع', perm: 'tasks:read' },
   { href: '/tasks', label: 'المهام', perm: 'tasks:read' },
-  { href: '/delivery', label: 'مركز التوصيل', perm: 'tasks:read' },
-  { href: '/concrete', label: 'جدول الصب', perm: 'tasks:read' },
-  { href: '/staffing', label: 'لوحة الإسناد', perm: 'tasks:read' },
-  { href: '/internal', label: 'أسطول الشركة', perm: 'tasks:read' },
-  { href: '/distribution', label: 'التوزيع اليومي', perm: 'tasks:read' },
-  { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own' },
+  { href: '/delivery', label: 'مركز التوصيل', perm: 'tasks:read', pack: 'delivery' },
+  { href: '/concrete', label: 'جدول الصب', perm: 'tasks:read', pack: 'concrete' },
+  { href: '/staffing', label: 'لوحة الإسناد', perm: 'tasks:read', pack: 'staffing' },
+  { href: '/internal', label: 'أسطول الشركة', perm: 'tasks:read', pack: 'internal' },
+  { href: '/distribution', label: 'التوزيع اليومي', perm: 'tasks:read', pack: 'distribution' },
+  { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },
   { href: '/assets', label: 'المركبات', perm: 'fleet:read' },
@@ -69,7 +69,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!me || (home && !path.startsWith(home))) return <div className="login muted">جارٍ التحميل…</div>;
 
   // links the user may open, and only the section headings that still have links under them
-  const nav = NAV.filter((n) => n.sec || !n.perm || can(me, n.perm)).filter((n, i, all) => !n.sec || (all[i + 1] && !all[i + 1].sec));
+  const nav = NAV.filter((n) => n.sec || ((!n.perm || can(me, n.perm)) && (!n.pack || hasPack(me, n.pack)))).filter((n, i, all) => !n.sec || (all[i + 1] && !all[i + 1].sec));
   const isOn = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
   return (
     <MeContext.Provider value={me}>

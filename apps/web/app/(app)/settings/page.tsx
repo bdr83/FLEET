@@ -1,16 +1,17 @@
 'use client';
 import { useState } from 'react';
-import { api } from '@/lib/api';
-import { dt, ROLE } from '@/lib/format';
+import { api, ApiError } from '@/lib/api';
+import { dt, PACK_INFO, ROLE } from '@/lib/format';
 import { can, useMe } from '@/components/me';
 import { Badge, clean, Empty, ErrorBox, Modal, Tabs, useAction, useForm, useLoad } from '@/components/ui';
 
-type Tab = 'company' | 'members' | 'branches' | 'audit' | 'account';
+type Tab = 'company' | 'packs' | 'members' | 'branches' | 'audit' | 'account';
 
 export default function SettingsPage() {
   const me = useMe();
   const tabs: [Tab, string][] = [['company', 'الشركة والفوترة'], ['branches', 'الفروع']];
   if (can(me, 'members:read')) tabs.splice(1, 0, ['members', 'المستخدمون والصلاحيات']), tabs.push(['audit', 'سجل التدقيق']);
+  tabs.splice(1, 0, ['packs', 'الأنشطة']);
   tabs.push(['account', 'حسابي']);
   const [tab, setTab] = useState<Tab>('company');
   return (
@@ -18,10 +19,38 @@ export default function SettingsPage() {
       <div className="page-head"><h1>الإعدادات</h1></div>
       <Tabs<Tab> tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'company' && <Company />}
+      {tab === 'packs' && <Packs />}
       {tab === 'members' && <Members />}
       {tab === 'branches' && <Branches />}
       {tab === 'audit' && <Audit />}
       {tab === 'account' && <Account />}
+    </div>
+  );
+}
+
+function Packs() {
+  const me = useMe();
+  const write = can(me, 'org:write');
+  const [packs, setPacks] = useState<string[]>(me.packs ?? []);
+  const { busy, error, run } = useAction();
+  const [saved, setSaved] = useState(false);
+  const save = () => { setSaved(false); void run(async () => {
+    if (!packs.length) throw new ApiError(400, 'اختر نشاطًا واحدًا على الأقل');
+    await api('/packs', { method: 'PUT', body: { packs } }); setSaved(true); location.reload();
+  }); };
+  return (
+    <div className="card stack" style={{ maxWidth: 560 }}>
+      <p className="muted" style={{ margin: 0 }}>الأنشطة المفعّلة تظهر شاشاتها في القائمة ويمكن إنشاء مهامها. إيقاف نشاط يخفي شاشاته ويمنع مهامًا جديدة منه، والمهام السابقة تبقى في سجل المهام والفواتير.</p>
+      <ErrorBox error={error} />
+      {saved && <div className="alert ok">تم الحفظ</div>}
+      {PACK_INFO.map((p) => (
+        <label key={p.code} className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
+          <input type="checkbox" name={`pack-${p.code}`} style={{ width: 'auto', marginTop: 4 }} disabled={!write} checked={packs.includes(p.code)}
+            onChange={(e) => setPacks((x) => e.target.checked ? [...x, p.code] : x.filter((c) => c !== p.code))} />
+          <span>{p.label} <span className="muted">· القطاع {p.sector}</span><br /><span className="muted" style={{ fontSize: '0.85em' }}>{p.hint}</span></span>
+        </label>
+      ))}
+      {write && <div><button className="primary" disabled={busy} onClick={save}>حفظ</button></div>}
     </div>
   );
 }

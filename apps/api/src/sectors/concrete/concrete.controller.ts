@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { PoolClient } from 'pg';
-import { AuthContext, AuthGuard, Perm } from '../../auth/auth.guard';
+import { AuthContext, AuthGuard, Perm, Pack } from '../../auth/auth.guard';
 import { Auth } from '../../auth/auth.decorator';
 import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
@@ -55,6 +55,7 @@ const version = (b: Record<string, unknown>) => v.int(b?.version, 'version', 1, 
  */
 @Controller('v1/concrete')
 @UseGuards(AuthGuard)
+@Pack('concrete')
 export class ConcreteController {
   constructor(private readonly db: DbService) {}
 

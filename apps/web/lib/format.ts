@@ -47,6 +47,16 @@ export const TASK_STATUS: Record<string, { label: string; tone: string }> = {
 export const ROLE: Record<string, string> = {
   owner: 'مالك', admin: 'مدير', dispatcher: 'موزّع', accountant: 'محاسب', branch_supervisor: 'مشرف فرع', driver: 'سائق', customer: 'عميل', employee: 'موظف',
 };
+/** Sector packs a company can turn on, in the order of the sector list. */
+export const PACK_INFO: { code: string; sector: number; label: string; hint: string }[] = [
+  { code: 'delivery', sector: 1, label: 'توصيل الطلبات والمندوبين', hint: 'طلبات توصيل، تتبع للمستلم، COD، عمولات' },
+  { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
+  { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
+  { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
+  { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
+];
+/** Task types of the packs a company turned on (all when the list is unknown). */
+export const enabledPacks = (packs?: string[]) => Object.entries(PACKS).filter(([k]) => !packs || packs.includes(k.split('@')[0]));
 export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي', 'distribution@1': 'توزيع ذاتي' };
 export const packLabel = (p: string) => PACKS[p] ?? p;
 

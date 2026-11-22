@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError, session } from '@/lib/api';
-import { ROLE } from '@/lib/format';
+import { PACK_INFO, ROLE } from '@/lib/format';
 import { ErrorBox, useAction } from '@/components/ui';
 
 interface Membership { tenant_id: string; tenant_name: string; tenant_status: string; role_code: string }
@@ -23,6 +23,7 @@ export function LoginForm({ phoneEnabled }: { phoneEnabled: boolean }) {
   const [resetOn, setResetOn] = useState(false);
   const [list, setList] = useState<Membership[]>([]);
   const [company, setCompany] = useState('');
+  const [packs, setPacks] = useState<string[]>([]);
   const { busy, error, run } = useAction();
 
   useEffect(() => { session('methods').then((m) => setResetOn(!!m.password_reset)).catch(() => undefined); }, []);
@@ -48,7 +49,10 @@ export function LoginForm({ phoneEnabled }: { phoneEnabled: boolean }) {
   const requestCode = submit(async () => { const r = await session('request', { phone }); setDevCode(r.dev_code ?? null); setStep('code'); });
   const verify = submit(async () => afterLogin(await session('verify', { phone, code })));
   const pick = (id: string) => run(async () => { await session('select', { tenant_id: id }); go(); });
-  const onboard = submit(async () => { await session('onboard', { name: company, country: 'KW' }); go(); });
+  const onboard = submit(async () => {
+    if (!packs.length) throw new ApiError(400, 'اختر نشاطًا واحدًا على الأقل');
+    await session('onboard', { name: company, country: 'KW', packs }); go();
+  });
   const to = (s: Step) => () => setStep(s);
 
   const emailField = (
@@ -141,6 +145,16 @@ export function LoginForm({ phoneEnabled }: { phoneEnabled: boolean }) {
               <label className="field">اسم الشركة
                 <input name="company" value={company} onChange={(e) => setCompany(e.target.value)} required maxLength={120} />
               </label>
+              <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 6 }}>
+                <legend className="muted" style={{ marginBottom: 6 }}>نشاط شركتك (تقدر تغيّره من الإعدادات)</legend>
+                {PACK_INFO.map((p) => (
+                  <label key={p.code} className="row" style={{ gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+                    <input type="checkbox" name={`pack-${p.code}`} style={{ width: 'auto', marginTop: 4 }} checked={packs.includes(p.code)}
+                      onChange={(e) => setPacks((x) => e.target.checked ? [...x, p.code] : x.filter((c) => c !== p.code))} />
+                    <span>{p.label}<br /><span className="muted" style={{ fontSize: '0.85em' }}>{p.hint}</span></span>
+                  </label>
+                ))}
+              </fieldset>
               <button className="primary" disabled={busy}>إنشاء الشركة (تجربة مجانية)</button>
             </form>
           </div>

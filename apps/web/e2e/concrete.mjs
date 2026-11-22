@@ -33,11 +33,13 @@ const call = (method, path, body) => page.evaluate(async ([m, p, b]) => {
 
 try {
   await page.goto(`${WEB}/login`);
+  await page.click('button:has-text("الدخول برقم الجوال")');
   await page.fill('input[name=phone]', `+9655${stamp}`);
   await page.click('button:has-text("إرسال رمز التحقق")');
   await page.fill('input[name=code]', (await page.locator('.alert.ok .num').textContent()).trim());
   await page.click('button:has-text("دخول")');
   await page.fill('input[name=company]', 'خرسانة الخليج');
+  for (const c of await page.locator('input[name^=pack-]').all()) await c.check();
   await page.click('button:has-text("إنشاء الشركة")');
   await page.waitForURL(`${WEB}/`);
   const me = await call('GET', '/me');

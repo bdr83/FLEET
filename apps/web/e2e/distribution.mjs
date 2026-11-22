@@ -39,6 +39,7 @@ try {
   await page.fill('input[name=code]', (await page.locator('.alert.ok .num').textContent()).trim());
   await page.click('button:has-text("دخول")');
   await page.fill('input[name=company]', 'ألبان الخليج');
+  for (const c of await page.locator('input[name^=pack-]').all()) await c.check();
   await page.click('button:has-text("إنشاء الشركة")');
   await page.waitForURL(`${WEB}/`);
   const me = await call('GET', '/me');

@@ -12,11 +12,16 @@ export interface AuthContext extends TenantContext {
   branchIds: string[];
   /** Set for customer-portal users: the one customer they act for. */
   customerId: string | null;
+  /** Sector packs this company has turned on. */
+  packs: string[];
 }
 
 export const PERM_KEY = 'required_permission';
 /** Declares the permission an endpoint needs. Every route behind AuthGuard must declare one. */
 export const Perm = (p: Permission) => SetMetadata(PERM_KEY, p);
+export const PACK_KEY = 'required_pack';
+/** Marks a controller or route as part of a sector pack: 403 pack_disabled when the company has not turned it on. */
+export const Pack = (code: string) => SetMetadata(PACK_KEY, code);
 
 /**
  * Verifies the access token, then loads the caller's membership, role and scope
@@ -35,7 +40,7 @@ export class AuthGuard implements CanActivate {
 
     const row = await this.db.withTenant({ tenantId: claims.tid, entityIds: [] }, async (c) => {
       const r = await c.query(
-        `SELECT m.id, r.code, r.permissions, m.scope_legal_entity_ids, m.scope_branch_ids, m.customer_id, t.status
+        `SELECT m.id, r.code, r.permissions, m.scope_legal_entity_ids, m.scope_branch_ids, m.customer_id, t.status, t.packs
            FROM org.membership m
            JOIN org.role r ON r.id = m.role_id
            JOIN org.tenant t ON t.id = m.tenant_id
@@ -47,6 +52,8 @@ export class AuthGuard implements CanActivate {
     });
     if (!row || !['trial', 'active', 'past_due'].includes(row.status)) throw new UnauthorizedException();
     if (!hasPermission(row.permissions, needed)) throw new ForbiddenException();
+    const pack = this.reflector.getAllAndOverride<string | undefined>(PACK_KEY, [context.getHandler(), context.getClass()]);
+    if (pack && !(row.packs as string[]).includes(pack)) throw new ForbiddenException('pack_disabled');
 
     const ctx: AuthContext = {
       tenantId: claims.tid,
@@ -57,6 +64,7 @@ export class AuthGuard implements CanActivate {
       entityIds: row.scope_legal_entity_ids ?? [],
       branchIds: row.scope_branch_ids ?? [],
       customerId: row.customer_id ?? null,
+      packs: row.packs ?? [],
     };
     req.auth = ctx;
     return true;

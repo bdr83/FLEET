@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { CONTRACT_STATUS, day, money, PACKS, packLabel, UNIT } from '@/lib/format';
+import { CONTRACT_STATUS, day, enabledPacks, money, packLabel, UNIT } from '@/lib/format';
 import { can, useMe } from '@/components/me';
 import { clean, Empty, ErrorBox, Tone, useAction, useForm, useLoad } from '@/components/ui';
 
@@ -74,6 +74,7 @@ export default function ContractDetail() {
 }
 
 function RateForm({ contractId, onDone }: { contractId: string; onDone: (c: Contract) => void }) {
+  const me = useMe();
   const { f, bind, setF } = useForm({ sector_pack: '', unit: 'task', price: '', included_qty: '', min_charge: '', description: '' });
   const { busy, error, run } = useAction();
   const submit = (e: React.FormEvent) => {
@@ -87,7 +88,7 @@ function RateForm({ contractId, onDone }: { contractId: string; onDone: (c: Cont
     <form className="stack" onSubmit={submit}>
       <ErrorBox error={error} />
       <div className="form-2">
-        <label className="field">نوع العمل<select {...bind('sector_pack')}><option value="">كل الأنواع</option>{Object.entries(PACKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className="field">نوع العمل<select {...bind('sector_pack')}><option value="">كل الأنواع</option>{enabledPacks(me.packs).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
         <label className="field">الوحدة<select {...bind('unit')}>{Object.entries(UNIT).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
         <label className="field">السعر للوحدة<input {...bind('price')} className="num" inputMode="decimal" required placeholder="0.000" pattern="\d{1,15}(\.\d{1,3})?" /></label>
         <label className="field">كمية مشمولة بلا سعر<input {...bind('included_qty')} className="num" inputMode="decimal" placeholder="0" /></label>
@@ -101,6 +102,7 @@ function RateForm({ contractId, onDone }: { contractId: string; onDone: (c: Cont
 
 /** Price preview: what one task of a type with given quantities costs under this contract. */
 function QuoteBox({ contract }: { contract: Contract }) {
+  const me = useMe();
   const units = [...new Set(contract.rates.map((r) => r.unit))];
   const [pack, setPack] = useState(contract.rates.find((r) => r.sector_pack)?.sector_pack ?? 'delivery@1');
   const [qty, setQty] = useState<Record<string, string>>(Object.fromEntries(units.map((u) => [u, u === 'task' ? '1' : ''])));
@@ -115,7 +117,7 @@ function QuoteBox({ contract }: { contract: Contract }) {
     <section className="card stack">
       <h2>حاسبة السعر</h2>
       <form className="row" onSubmit={submit} style={{ alignItems: 'end' }}>
-        <label className="field">نوع العمل<select value={pack} onChange={(e) => setPack(e.target.value)}>{Object.entries(PACKS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className="field">نوع العمل<select value={pack} onChange={(e) => setPack(e.target.value)}>{enabledPacks(me.packs).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
         {units.map((u) => (
           <label key={u} className="field" style={{ width: 110 }}>{UNIT[u] ?? u}<input className="num" inputMode="decimal" value={qty[u] ?? ''} onChange={(e) => setQty({ ...qty, [u]: e.target.value })} /></label>
         ))}
