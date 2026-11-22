@@ -30,10 +30,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: SSH key and host
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           test -n "$HOST" || { echo "DEPLOY_HOST secret is missing"; exit 1; }
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id && chmod 600 ~/.ssh/id
+          # المفتاح كما لُصق في GitHub قد يحمل CR أو مسافات زائدة أو يأتي في سطر واحد: نعيده للصيغة القياسية
+          umask 077
+          python3 - > ~/.ssh/id <<'PY'
+          import os, re, textwrap
+          k = os.environ["KEY"].replace("\r", "").strip()
+          m = re.search(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", k, re.S)
+          if not m:
+              raise SystemExit("DEPLOY_SSH_KEY does not look like a private key (no BEGIN/END lines)")
+          body = re.sub(r"\s+", "", m.group(2))
+          print(f"-----BEGIN {m.group(1)}-----")
+          print("\n".join(textwrap.wrap(body, 70)))
+          print(f"-----END {m.group(1)}-----")
+          PY
+          chmod 600 ~/.ssh/id
+          ssh-keygen -y -f ~/.ssh/id > /dev/null || { echo "DEPLOY_SSH_KEY is not a valid private key: paste it again, the whole text from BEGIN to END"; exit 1; }
           ssh-keyscan -T 15 "$HOST" >> ~/.ssh/known_hosts
       - name: Settings from GitHub
         env:
