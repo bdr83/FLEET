@@ -13,6 +13,8 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string }[] = [
   { href: '/delivery', label: 'مركز التوصيل', perm: 'tasks:read' },
   { href: '/concrete', label: 'جدول الصب', perm: 'tasks:read' },
   { href: '/staffing', label: 'لوحة الإسناد', perm: 'tasks:read' },
+  { href: '/internal', label: 'أسطول الشركة', perm: 'tasks:read' },
+  { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },
   { href: '/assets', label: 'المركبات', perm: 'fleet:read' },
@@ -47,6 +49,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       if (e instanceof ApiError && e.status === 403) {
         const p = await api<{ name: string }>('/portal/me').catch(() => null);
         if (p) return setMe({ ...PORTAL_ME, display_name: p.name });
+        // an employee of a company using its own fleet: only vehicle requests
+        const e = await api<{ user: { id: string; display_name: string | null; phone: string | null; role: string; permissions: string[] } }>('/internal/my').catch(() => null);
+        if (e) return setMe({ ...PORTAL_ME, user_id: e.user.id, display_name: e.user.display_name, phone: e.user.phone, role: e.user.role, permissions: e.user.permissions });
         return setFailed('هذا الحساب مخصص لتطبيق السائق على الجوال.');
       }
       setFailed(e.message);
@@ -55,11 +60,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => setOpen(false), [path]);
   // Customer-portal users only have the portal
   const portalOnly = me?.role === 'customer';
-  useEffect(() => { if (portalOnly && !path.startsWith('/portal')) router.replace('/portal'); }, [portalOnly, path, router]);
+  const requestsOnly = !!me && !portalOnly && !can(me, 'tasks:read') && can(me, 'vehicle_requests:own');
+  const home = portalOnly ? '/portal' : requestsOnly ? '/requests' : null;
+  useEffect(() => { if (home && !path.startsWith(home)) router.replace(home); }, [home, path, router]);
 
   if (failed) return <div className="login"><div className="card"><p>{failed}</p><Link href="/login">تسجيل الدخول</Link></div></div>;
-  if (!me || (portalOnly && !path.startsWith('/portal'))) return <div className="login muted">جارٍ التحميل…</div>;
+  if (!me || (home && !path.startsWith(home))) return <div className="login muted">جارٍ التحميل…</div>;
 
+  // links the user may open, and only the section headings that still have links under them
+  const nav = NAV.filter((n) => n.sec || !n.perm || can(me, n.perm)).filter((n, i, all) => !n.sec || (all[i + 1] && !all[i + 1].sec));
   const isOn = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
   return (
     <MeContext.Provider value={me}>
@@ -67,9 +76,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className={`side ${open ? 'open' : ''}`} aria-label="القائمة">
           <div className="brand">إدارة الأساطيل</div>
           <nav className="nav">
-            {portalOnly ? <Link href="/portal" className="on">طلباتي</Link> : NAV.map((n, i) => n.sec
+            {portalOnly ? <Link href="/portal" className="on">طلباتي</Link> : nav.map((n, i) => n.sec
               ? <div className="sec" key={i}>{n.sec}</div>
-              : (!n.perm || can(me, n.perm)) && <Link key={n.href} href={n.href!} className={isOn(n.href!) ? 'on' : ''}>{n.label}</Link>)}
+              : <Link key={n.href} href={n.href!} className={isOn(n.href!) ? 'on' : ''}>{n.label}</Link>)}
           </nav>
         </aside>
         <div className="main">

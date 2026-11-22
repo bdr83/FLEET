@@ -5,7 +5,7 @@ export const PERMISSIONS = [
   'fleet:read', 'fleet:write',
   'customers:read', 'customers:write',
   'billing:read', 'billing:write',
-  'reports:read', 'shift:own', 'portal:own',
+  'reports:read', 'shift:own', 'portal:own', 'vehicle_requests:own',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

@@ -54,8 +54,19 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isInternal) ...[
+          Card(key: const Key('trip-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('مشوار لموظف في الشركة', style: text.labelMedium),
+            if (t.purpose != null) Text(t.purpose!, style: text.titleLarge),
+            if (t.department != null) Text('الإدارة: ${t.department}'),
+            if (t.passengers != null) Row(children: [const Text('الركاب: '), Ltr('${t.passengers}')]),
+            const SizedBox(height: 4),
+            const Text('سجّل قراءة العدّاد عند استلام المركبة وعند إرجاعها. المسافة بينهما تُحمّل على الإدارة.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(t.isConcrete || t.isStaffing ? 'الموقع' : 'العنوان', style: text.labelMedium),
+          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
           if (t.notes != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(t.notes!)),
           if (t.windowFrom != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('الموعد: ${kwTime(t.windowFrom, date: true)} إلى ${kwTime(t.windowTo)}')),
@@ -71,7 +82,15 @@ class TaskScreen extends StatelessWidget {
             trailing: t.sitePhone == null ? null : IconButton.filledTonal(
               tooltip: 'اتصال', icon: const Icon(Icons.call), onPressed: () => launchUrl(Uri.parse('tel:${t.sitePhone}'))),
           )),
-        if (!t.isConcrete && !t.isStaffing && (t.recipientName != null || t.recipientPhone != null))
+        if (t.isInternal && t.requester != null)
+          Card(child: ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: Text(t.requester!),
+            subtitle: t.requesterPhone == null ? null : Ltr(t.requesterPhone!),
+            trailing: t.requesterPhone == null ? null : IconButton.filledTonal(
+              tooltip: 'اتصال', icon: const Icon(Icons.call), onPressed: () => launchUrl(Uri.parse('tel:${t.requesterPhone}'))),
+          )),
+        if (!t.isConcrete && !t.isStaffing && !t.isInternal && (t.recipientName != null || t.recipientPhone != null))
           Card(child: ListTile(
             leading: const Icon(Icons.person_outline),
             title: Text(t.recipientName ?? 'المستلم'),
@@ -185,12 +204,56 @@ class _ActionsState extends State<_Actions> {
           toast(context, s.offline ? 'سُجّل الانصراف وسيُرسل عند عودة الاتصال' : 'سُجّل الانصراف. يومك بانتظار اعتماد العميل');
           Navigator.of(context).pop();
         }
+      case TaskAction.vehicleOut:
+      case TaskAction.vehicleBack:
+        final out = action == TaskAction.vehicleOut;
+        final reading = await _odometer(context, out);
+        if (reading == null) return;
+        final err = out
+            ? await s.vehicleOut(task.id, odometerKm: reading.km, fuel: reading.fuel)
+            : await s.vehicleBack(task.id, odometerKm: reading.km, fuel: reading.fuel);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        if (!out) {
+          toast(context, s.offline ? 'سُجّل الإرجاع وسيُرسل عند عودة الاتصال' : 'أُرجعت المركبة وانتهى المشوار');
+          Navigator.of(context).pop();
+        }
       case TaskAction.returned:
         await s.milestone(task.id, 'returned_to_sender');
         if (context.mounted) Navigator.of(context).pop();
       default:
     }
     if (action == TaskAction.complete && context.mounted) Navigator.of(context).pop();
+  }
+
+  /// Odometer (required) and fuel in eighths, for taking or bringing back the vehicle.
+  Future<({int km, int? fuel})?> _odometer(BuildContext context, bool out) async {
+    final odo = TextEditingController();
+    int? fuel;
+    return showModalBottomSheet<({int km, int? fuel})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(out ? 'استلام المركبة' : 'إرجاع المركبة', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          TextField(key: const Key('odometer'), controller: odo, autofocus: true, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'قراءة العدّاد (كم)'), onChanged: (_) => set(() {})),
+          const SizedBox(height: 12),
+          Text('الوقود', style: Theme.of(ctx).textTheme.labelMedium),
+          Wrap(spacing: 6, children: [
+            for (final n in [0, 2, 4, 6, 8]) ChoiceChip(key: Key('fuel-$n'), label: Text(fuelLabel(n)), selected: fuel == n, onSelected: (v) => set(() => fuel = v ? n : null)),
+          ]),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('odometer-save'),
+            onPressed: int.tryParse(odo.text.trim()) == null ? null : () => Navigator.pop(ctx, (km: int.parse(odo.text.trim()), fuel: fuel)),
+            child: Text(out ? 'تأكيد الاستلام' : 'تأكيد الإرجاع'),
+          ),
+        ]),
+      )),
+    );
   }
 
   Future<void> _fail(BuildContext context) async {

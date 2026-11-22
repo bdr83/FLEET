@@ -65,7 +65,7 @@ function EntityCard({ e, write, onSaved }: { e: Entity; write: boolean; onSaved:
 }
 
 interface Member { id: string; phone: string; display_name: string | null; role: string; customer_id: string | null; valid_until: string | null; created_at: string; user_id: string }
-const ASSIGNABLE = ['admin', 'dispatcher', 'accountant', 'branch_supervisor', 'driver', 'customer', 'owner'];
+const ASSIGNABLE = ['admin', 'dispatcher', 'accountant', 'branch_supervisor', 'driver', 'employee', 'customer', 'owner'];
 function Members() {
   const me = useMe();
   const list = useLoad(() => api<{ data: Member[] }>('/members').then((r) => r.data));

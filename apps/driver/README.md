@@ -28,6 +28,7 @@ flutter build web --no-web-resources-cdn --dart-define=API_URL=http://localhost:
 node e2e/driver_web.mjs                       # 9 خطوات: من الدخول إلى التسليم بالرمز والعهدة والموقع الحي
 node e2e/driver_concrete.mjs                  # 6 خطوات: رحلة الخلاطة وتذكرة التسليم
 node e2e/driver_staffing.mjs                  # 5 خطوات: مناوبة التوريد والحضور والانصراف
+node e2e/driver_internal.mjs                  # 5 خطوات: مشوار الأسطول الداخلي بالعدّاد والوقود
 ```
 
 ## البناء للنشر

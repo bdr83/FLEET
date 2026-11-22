@@ -45,7 +45,7 @@ export const TASK_STATUS: Record<string, { label: string; tone: string }> = {
   canceled: { label: 'ملغاة', tone: 'muted' },
 };
 export const ROLE: Record<string, string> = {
-  owner: 'مالك', admin: 'مدير', dispatcher: 'موزّع', accountant: 'محاسب', branch_supervisor: 'مشرف فرع', driver: 'سائق', customer: 'عميل',
+  owner: 'مالك', admin: 'مدير', dispatcher: 'موزّع', accountant: 'محاسب', branch_supervisor: 'مشرف فرع', driver: 'سائق', customer: 'عميل', employee: 'موظف',
 };
 export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي' };
 export const packLabel = (p: string) => PACKS[p] ?? p;
@@ -173,3 +173,19 @@ export const WORKER_DOC_TYPES = ['driving_license', 'residency', 'civil_id', 'wo
 export const WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 export const workDaysLine = (d: number[]) => (d.length === 7 ? 'كل الأيام' : d.join(',') === '0,1,2,3,4' ? 'الأحد – الخميس' : d.map((x) => WEEKDAYS[x]).join('، '));
 export const hours = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })} س`);
+
+/** In-house fleet pack (internal@1) labels. */
+export const INTERNAL_STAGE: Record<string, string> = { vehicle_out: 'استلم المركبة', vehicle_back: 'أرجع المركبة' };
+Object.assign(STAGE, INTERNAL_STAGE);
+export const INTERNAL_FAIL: Record<string, string> = { vehicle_breakdown: 'عطل المركبة', accident: 'حادث', trip_canceled: 'أُلغي المشوار', other: 'سبب آخر' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(INTERNAL_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+export const VR_STATUS: Record<string, { label: string; tone: string }> = {
+  pending: tone('بانتظار الموافقة', 'warning'), approved: tone('موافق عليه', 'info'), rejected: tone('مرفوض', 'danger'), allocated: tone('خُصصت مركبة', 'primary'),
+  in_use: tone('المركبة مع الموظف', 'warning'), returned: tone('أُرجعت', 'success'), canceled: tone('ملغى'),
+};
+export const VEHICLE_STATE: Record<string, { label: string; tone: string }> = {
+  free: tone('متاحة', 'success'), booked: tone('محجوزة الآن', 'info'), in_use: tone('في مشوار', 'warning'), out_of_service: tone('خارج الخدمة', 'danger'),
+};
+/** Fuel gauge in eighths (0–8). */
+export const fuelLine = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n === 8 ? 'ممتلئ' : n === 0 ? 'فارغ' : `${n}/8`);
+export const km = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US')} كم`);

@@ -126,4 +126,30 @@ void main() {
       expect(stageLabels['check_in'], isNotNull);
     });
   });
+
+  group('in-house trips', () {
+    DriverTask trip(String status, {String? stage}) => DriverTask(
+        id: 'i', status: status, sectorPack: 'internal@1', version: 1, stage: stage,
+        attributes: {'request_ref': 'VR-7', 'purpose': 'نقل وفد', 'address': 'الأحمدي', 'department': 'المبيعات', 'requester': 'سارة', 'requester_phone': '+96550000022', 'passengers': 6});
+    test('accept, take the vehicle, bring it back', () {
+      expect(nextActions(trip('assigned')), [TaskAction.accept]);
+      expect(nextActions(trip('accepted')), [TaskAction.vehicleOut]);
+      expect(nextActions(trip('in_progress', stage: 'vehicle_out')), [TaskAction.vehicleBack, TaskAction.fail]);
+      expect(nextActions(trip('in_progress', stage: 'vehicle_back')), [TaskAction.complete]);
+      expect(nextActions(trip('completed')), isEmpty);
+      expect(actionLabel(trip('accepted'), TaskAction.vehicleOut), 'استلمت المركبة');
+      expect(actionLabel(trip('in_progress'), TaskAction.vehicleBack), 'أرجعت المركبة');
+      expect(actionLabel(trip('assigned'), TaskAction.accept), 'قبول المشوار');
+    });
+    test('trip details and reasons', () {
+      final t = trip('assigned');
+      expect(t.isInternal, isTrue);
+      expect(t.address, 'الأحمدي');
+      expect((t.purpose, t.department, t.requester, t.passengers), ('نقل وفد', 'المبيعات', 'سارة', 6));
+      expect(failReasonsFor(t), internalFailReasons);
+      expect(stageLabels['vehicle_out'], isNotNull);
+      expect(rejectReasons['odometer_too_low'], isNotNull);
+      expect([fuelLabel(0), fuelLabel(4), fuelLabel(8)], ['فارغ', '4/8', 'ممتلئ']);
+    });
+  });
 }

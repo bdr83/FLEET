@@ -90,6 +90,13 @@ class DriverTask {
   bool get isConcrete => sectorPack == 'concrete@1' && ticket != null;
   /// A day-shift of a driver placed with a customer (driver supply): check in at the site, check out at the end.
   bool get isStaffing => sectorPack == 'staffing@1';
+  /// A trip of the company's own fleet (in-house): take the vehicle with its odometer, drive the employee, bring it back.
+  bool get isInternal => sectorPack == 'internal@1';
+  String? get purpose => attributes['purpose'] as String?;
+  String? get department => attributes['department'] as String?;
+  String? get requester => attributes['requester'] as String?;
+  String? get requesterPhone => attributes['requester_phone'] as String?;
+  int? get passengers => attributes['passengers'] is num ? (attributes['passengers'] as num).toInt() : null;
   String? get shift => attributes['shift'] as String?;
   String? get workDate => attributes['work_date'] as String?;
   String? get requestRef => attributes['request_ref'] as String?;
@@ -105,7 +112,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -171,11 +178,12 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut }
+enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
   if (t.isStaffing) return _staffingActions(t, now ?? DateTime.now());
+  if (t.isInternal) return _internalActions(t);
   switch (t.status) {
     case 'assigned':
       return [TaskAction.accept];
@@ -233,9 +241,36 @@ List<TaskAction> _staffingActions(DriverTask t, DateTime now) {
   }
 }
 
+/// In-house trip: accept → take the vehicle (odometer; starts the trip) → bring it back (odometer; ends the trip).
+List<TaskAction> _internalActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.vehicleOut];
+    case 'in_progress':
+      return t.stage == 'vehicle_back' ? [TaskAction.complete] : [TaskAction.vehicleBack, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
 /// The button text, worded for the kind of task.
-String actionLabel(DriverTask t, TaskAction a) =>
-    t.isConcrete ? (concreteActionLabels[a] ?? actionLabels[a]!) : t.isStaffing ? (staffingActionLabels[a] ?? actionLabels[a]!) : actionLabels[a]!;
+String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
+    ? (concreteActionLabels[a] ?? actionLabels[a]!)
+    : t.isStaffing
+        ? (staffingActionLabels[a] ?? actionLabels[a]!)
+        : t.isInternal
+            ? (internalActionLabels[a] ?? actionLabels[a]!)
+            : actionLabels[a]!;
+
+const internalActionLabels = {
+  TaskAction.accept: 'قبول المشوار',
+  TaskAction.vehicleOut: 'استلمت المركبة',
+  TaskAction.vehicleBack: 'أرجعت المركبة',
+  TaskAction.complete: 'إنهاء المشوار',
+  TaskAction.fail: 'تعذّر إكمال المشوار',
+};
 
 const staffingActionLabels = {
   TaskAction.checkIn: 'تسجيل الحضور',
@@ -287,6 +322,8 @@ const stageLabels = {
   'pour_end': 'انتهى الصب',
   'check_in': 'سجّل الحضور',
   'check_out': 'سجّل الانصراف',
+  'vehicle_out': 'المركبة معك',
+  'vehicle_back': 'أُرجعت المركبة',
 };
 
 /// Same codes as the API (staffing FAIL_REASONS).
@@ -298,7 +335,19 @@ const staffingFailReasons = {
 };
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
-Map<String, String>? failReasonsFor(DriverTask t) => t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isDelivery ? failReasons : null;
+Map<String, String>? failReasonsFor(DriverTask t) =>
+    t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDelivery ? failReasons : null;
+
+/// Same codes as the API (internal FAIL_REASONS).
+const internalFailReasons = {
+  'vehicle_breakdown': 'عطل في المركبة',
+  'accident': 'حادث',
+  'trip_canceled': 'أُلغي المشوار',
+  'other': 'سبب آخر',
+};
+
+/// Fuel gauge in eighths, as the office records it.
+String fuelLabel(int n) => n == 8 ? 'ممتلئ' : n == 0 ? 'فارغ' : '$n/8';
 
 /// Same codes as the API (concrete FAIL_REASONS).
 const concreteFailReasons = {
@@ -342,4 +391,7 @@ const rejectReasons = {
   'quantity_exceeds_load': 'المصبوب والمرتجع أكثر من حمولة الخلاطة',
   'invalid_reason': 'سبب غير مناسب لهذا النوع من المهام',
   'too_early': 'يفتح تسجيل الحضور قبل بداية الدوام بساعتين',
+  'odometer_required': 'أدخل قراءة العدّاد',
+  'odometer_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمركبة',
+  'vehicle_booked': 'المركبة محجوزة لمشوار آخر قبل موعدك',
 };

@@ -46,7 +46,7 @@ try {
   ok('طلب بلا ترويسة CSRF مرفوض');
 
   // Fleet screens: add a vehicle, a driver with a phone (enables the driver app), and a document that expires soon
-  await page.click('nav a:has-text("المركبات")');
+  await page.click('nav a:text-is("المركبات")');
   await page.click('button:has-text("إضافة مركبة")');
   await page.fill('input[name=plate_no]', '12-34567');
   await page.fill('input[name=make]', 'Toyota');

@@ -207,6 +207,31 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
   }
 
+  /// In-house trip: the driver takes the vehicle with its odometer (and fuel), which starts the trip. Online the server answers
+  /// at once so a wrong reading shows on the screen; offline both steps are queued in order.
+  Future<String?> vehicleOut(String taskId, {required int odometerKm, int? fuel}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'vehicle_out', 'odometer_km': odometerKm, 'fuel': ?fuel}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'in_progress', stage: 'vehicle_out'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'in_progress'});
+    return null;
+  }
+
+  /// Bringing the vehicle back records the odometer and ends the trip; the office sees the distance at once.
+  Future<String?> vehicleBack(String taskId, {required int odometerKm, int? fuel}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'vehicle_back', 'odometer_km': odometerKm, 'fuel': ?fuel}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'vehicle_back'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
+  String _refused(String taskId, OpResult r) {
+    queue.problems.removeWhere((p) => p.taskId == taskId && p.reason == r.reason);
+    notifyListeners();
+    return rejectReasons[r.reason] ?? r.reason ?? 'رُفض الطلب';
+  }
+
   /// Checks the recipient's PIN with the server when online (so a wrong PIN is known at once).
   /// Offline it is queued and checked when the phone reconnects. Returns null when accepted or queued.
   Future<String?> provePin(String taskId, String pin) async {

@@ -242,6 +242,7 @@ class _TaskTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(t.address.isEmpty ? 'بدون عنوان' : t.address, style: Theme.of(context).textTheme.titleMedium),
               if (t.recipientName != null) Text(t.recipientName!),
+              if (t.isInternal && t.purpose != null) Text('${t.purpose}${t.requester != null ? ' · ${t.requester}' : ''}'),
               if (t.isStaffing && t.shift != null) Row(children: [const Text('الدوام '), Ltr(t.shift!), if (t.workDate != null) ...[const Text(' · '), Ltr(t.workDate!)]]),
               if (t.codFils > 0) Padding(
                 padding: const EdgeInsets.only(top: 6),

@@ -259,3 +259,26 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 في `/driver/sync`: `milestone {code: check_in|check_out}`؛ الحضور بعد القبول ويفتح قبل بداية الدوام بساعتين (`too_early`) ويسجّل بُعده عن الموقع إن أُرسل الموقع، والبدء `in_progress` يحتاج الحضور، والانصراف يحتاج الحضور، والإكمال يحتاج الانصراف (`proof_required`). الإكمال يكتب `attributes.quantities = {hour}` (الوقت من الحضور للانصراف مقرّبًا) أو `{day: 1}`. أسباب المغادرة المبكرة: sick, vehicle_breakdown, sent_home_by_customer, other. `GET /driver/tasks` يعرض مناوبات التوريد التي تبدأ خلال 36 ساعة فقط. اعتماد العميل (أو المكتب) = المراجعة، ثم الفاتورة بسعر "ساعة" أو "يوم" في عقد العميل لنوع `staffing@1`.
 
+
+## قطاع الأسطول الداخلي internal@1 (القطاع 21)
+
+طلب المركبة يمر بـ `pending → approved|rejected → allocated → in_use → returned` أو `canceled`. التخصيص ينشئ مهمة `internal@1` بمرجع الطلب وحجزًا حصريًا للمركبة (والسائق إن وُجد) طوال الفترة، فقيود الإسناد نفسها تمنع الحجز المزدوج مع أي قطاع. الإسناد بلا سائق (قيادة ذاتية) مسموح: `assignment.worker_id` اختياري بشرط وجود مركبة.
+
+| الطريق | الصلاحية | ما يفعله |
+|---|---|---|
+| `GET/PUT /v1/internal/settings` | `tasks:read` / `org:write` | الموافقة، الاعتماد التلقائي حتى N ساعة، سعر الكم وساعة السائق، مهلة الإرجاع، ساعات الدوام |
+| `GET /v1/internal/departments`، `POST`، `PATCH :id` | `vehicle_requests:own` / `org:write` | الإدارات ومراكز التكلفة والمدير |
+| `GET /v1/internal/my` | `vehicle_requests:own` | إدارتي، طلباتي، وطلبات إداراتي بانتظار قراري |
+| `POST /v1/internal/requests` | `vehicle_requests:own` | طلب جديد؛ يُعتمد تلقائيًا إن أوقفت السياسة الموافقة أو كان المشوار قصيرًا أو الطالب مدير الإدارة |
+| `POST /v1/internal/requests/:id/decide` | مدير الإدارة أو `tasks:assign` | `{version, approve, note}`؛ الرفض يحتاج سببًا |
+| `POST /v1/internal/requests/:id/cancel` | الطالب أو `tasks:write` | قبل التسليم؛ يلغي المهمة ويحرر الحجز |
+| `GET /v1/internal/requests?status=open` و`/:id` | `tasks:read` (أو الطالب والمدير) | القائمة والتفاصيل |
+| `GET /v1/internal/requests/:id/options` | `tasks:assign` | المركبات والسائقون المتاحون للفترة |
+| `POST /v1/internal/requests/:id/allocate` | `tasks:assign` | `{version, asset_id, driver_worker_id?}` |
+| `POST /v1/internal/requests/:id/handover` و`/return` | `tasks:write` | `{version, odometer_km, fuel?, note?}` (الوقود بالثُمن 0–8)؛ الإرجاع ينهي الحجز الآن |
+| `GET /v1/internal/board?date=` | `tasks:read` | مركبات اليوم وحجوزاتها وحالتها الآن |
+| `GET /v1/internal/exceptions` | `tasks:read` | بلا مركبة، لم تُستلم، تأخر الإرجاع، تنتظر القرار، خارج الدوام |
+| `GET /v1/internal/who?asset_id&at` | `tasks:read` | من كان معه المفتاح وقت المخالفة (المشوار ثم وردية السائق) |
+| `GET /v1/internal/costs?from&to` | `reports:read` | لكل إدارة: المشاوير، الكم، ساعات السائق، التكلفة، المصروفات المعتمدة أثناء المشوار، الإجمالي |
+
+تطبيق السائق (مشوار مع سائق): `task_status accepted` ← `milestone vehicle_out {odometer_km, fuel?}` ← `in_progress` ← `milestone vehicle_back {odometer_km, fuel?}` ← `completed`. أسباب الرفض الجديدة: `odometer_required`، `odometer_too_low`، `vehicle_booked`. مشوار يتعذّر في الطريق يبقى «مع الموظف» حتى يسجّل المكتب الإرجاع، والمهمة تبقى فاشلة.
