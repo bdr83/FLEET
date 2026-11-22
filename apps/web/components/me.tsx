@@ -2,7 +2,7 @@
 import { createContext, useContext } from 'react';
 
 export interface Me {
-  user_id: string; phone: string | null; display_name: string | null;
+  user_id: string; phone: string | null; email?: string | null; display_name: string | null;
   tenant_id: string; tenant_name: string | null; tenant_status: string | null;
   role: string; permissions: string[];
   scope: { legal_entity_ids: string[]; branch_ids: string[] };

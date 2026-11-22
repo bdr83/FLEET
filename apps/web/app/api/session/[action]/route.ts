@@ -3,7 +3,8 @@ import { callApi, clearCookie, COOKIE, csrfOk, setSession, setUserToken } from '
 
 /**
  * Login flow without exposing tokens to the browser:
- * request (send OTP) → verify (user token kept in a cookie, returns the companies) → select or onboard (session cookies) → logout.
+ * login / register / reset (email + password) or request + verify (phone OTP) → user token kept in a cookie, returns the companies
+ * → select or onboard (session cookies) → logout.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ action: string }> }) {
   if (!csrfOk(req)) return NextResponse.json({ message: 'missing csrf header' }, { status: 403 });
@@ -14,8 +15,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ action: st
   switch (action) {
     case 'request':
       return pass(await callApi('/v1/auth/otp/request', { method: 'POST', body: { phone: body.phone } }));
-    case 'verify': {
-      const r = await callApi('/v1/auth/otp/verify', { method: 'POST', body: { phone: body.phone, code: body.code } });
+    case 'methods':
+      return pass(await callApi('/v1/auth/methods', { method: 'GET' }));
+    case 'forgot':
+      return pass(await callApi('/v1/auth/password/forgot', { method: 'POST', body: { email: body.email } }));
+    case 'verify':
+    case 'login':
+    case 'register':
+    case 'reset': {
+      const r = action === 'verify'
+        ? await callApi('/v1/auth/otp/verify', { method: 'POST', body: { phone: body.phone, code: body.code } })
+        : action === 'login'
+          ? await callApi('/v1/auth/login', { method: 'POST', body: { email: body.email, password: body.password } })
+          : action === 'register'
+            ? await callApi('/v1/auth/register', { method: 'POST', body: { email: body.email, password: body.password, display_name: body.display_name } })
+            : await callApi('/v1/auth/password/reset', { method: 'POST', body: { token: body.token, password: body.password } });
       if (!r.ok) return pass(r);
       const data = await r.json();
       const res = NextResponse.json({ memberships: data.memberships });

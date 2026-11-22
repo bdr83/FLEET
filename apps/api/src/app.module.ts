@@ -5,6 +5,8 @@ import { TasksController } from './tasks/tasks.controller';
 import { AuthController } from './auth/auth.controller';
 import { OtpService, SMS_SENDER } from './auth/otp.service';
 import { smsSenderFromEnv } from './auth/sms';
+import { MAIL_SENDER, mailSenderFromEnv } from './auth/mail';
+import { PasswordService } from './auth/password.service';
 import { SessionService } from './auth/session.service';
 import { AuthGuard } from './auth/auth.guard';
 import { TenantsController } from './tenants/tenants.controller';
@@ -40,10 +42,12 @@ import { MaintenanceService } from './maintenance/maintenance.service';
   providers: [
     DbService,
     OtpService,
+    PasswordService,
     SessionService,
     AuthGuard,
     MaintenanceService,
     { provide: SMS_SENDER, useFactory: () => smsSenderFromEnv() },
+    { provide: MAIL_SENDER, useFactory: () => mailSenderFromEnv() },
   ],
 })
 export class AppModule implements NestModule {

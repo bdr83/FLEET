@@ -8,6 +8,7 @@ const WEB = process.env.WEB_URL ?? 'http://localhost:3001';
 const API = process.env.API_URL ?? 'http://localhost:3000';
 const SHOTS = process.env.SHOTS_DIR;
 const phone = `+9655${String(Date.now()).slice(-7)}`;
+const ownerEmail = `owner-${Date.now()}@example.com`;
 let step = 0;
 const ok = (m) => console.log(`✓ ${++step}. ${m}`);
 const shot = async (page, name) => SHOTS && page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
@@ -22,18 +23,30 @@ try {
   await page.waitForURL(/\/login\?next=%2Ftasks/);
   ok('غير المسجّل يُحوَّل إلى الدخول');
 
-  // 2. OTP login, then create the first company
-  await page.fill('input[name=phone]', phone);
-  await page.click('button:has-text("إرسال رمز التحقق")');
-  const code = (await page.locator('.alert.ok .num').textContent()).trim();
-  await page.fill('input[name=code]', code);
-  await page.click('button:has-text("دخول")');
+  // 2. New account with email + password, then create the first company
+  await page.click('button:has-text("حساب جديد")');
+  await page.fill('input[name=display_name]', 'مالك الاختبار');
+  await page.fill('input[name=email]', ownerEmail);
+  await page.fill('input[name=password]', 'smoke-password-1');
+  await page.click('button:has-text("إنشاء الحساب")');
   await page.fill('input[name=company]', 'شركة اختبار المتصفح');
   await shot(page, '01-onboard');
   await page.click('button:has-text("إنشاء الشركة")');
   await page.waitForURL(/\/tasks$/);
   await page.locator('h1:has-text("المهام")').waitFor();
-  ok('الدخول بالرمز وإنشاء الشركة');
+  ok('حساب بالبريد وإنشاء الشركة');
+
+  // Log out and back in with the password
+  await page.click('button:has-text("خروج")');
+  await page.waitForURL(/\/login/);
+  await page.fill('input[name=email]', ownerEmail);
+  await page.fill('input[name=password]', 'wrong-password');
+  await page.click('form button.primary:has-text("دخول")');
+  await page.locator('text=البريد أو كلمة المرور غير صحيحة').waitFor();
+  await page.fill('input[name=password]', 'smoke-password-1');
+  await page.click('form button.primary:has-text("دخول")');
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'));
+  ok('الدخول بكلمة المرور، والخاطئة مرفوضة');
 
   // Tokens never reach JavaScript: session cookies are httpOnly
   const jsCookies = await page.evaluate(() => document.cookie);
@@ -296,6 +309,7 @@ try {
   await page.click('button[role=tab]:has-text("المستخدمون")');
   await page.click('button:has-text("إضافة مستخدم")');
   const portalPhone = `+9659${String(Date.now()).slice(-7)}`;
+  await page.selectOption('.modal select[name=by]', 'phone');
   await page.fill('.modal input[name=phone]', portalPhone);
   await page.fill('.modal input[name=display_name]', 'موظف متجر الورد');
   await page.selectOption('.modal select[name=role_code]', 'customer');
@@ -309,6 +323,7 @@ try {
   // The merchant logs in: only the portal, their own task, and a new request
   await page.click('button:has-text("خروج")');
   await page.waitForURL(/\/login/);
+  await page.click('button:has-text("الدخول برقم الجوال")');
   await page.fill('input[name=phone]', portalPhone);
   await page.click('button:has-text("إرسال رمز التحقق")');
   await page.fill('input[name=code]', (await page.locator('.alert.ok .num').textContent()).trim());

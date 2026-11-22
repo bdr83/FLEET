@@ -4,12 +4,15 @@ import type { PoolClient } from 'pg';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { normalizePhone } from '../common/phone';
+import { hashPassword, normalizeEmail, passwordProblem } from '../auth/password';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 import { isUuid } from '../auth/tokens';
 
 interface MemberInput {
   phone?: string;
+  email?: string;
+  password?: string;
   display_name?: string;
   role_code?: string;
   scope_legal_entity_ids?: string[] | null;
@@ -19,7 +22,7 @@ interface MemberInput {
   department_id?: string | null;
 }
 
-const SELECT = `SELECT m.id, m.user_id, u.phone, u.display_name, r.code AS role, m.scope_legal_entity_ids,
+const SELECT = `SELECT m.id, m.user_id, u.phone, u.email, u.display_name, r.code AS role, m.scope_legal_entity_ids,
                        m.scope_branch_ids, m.customer_id, m.valid_until, m.revoked_at, m.created_at, m.department_id
                   FROM org.membership m JOIN org.app_user u ON u.id = m.user_id JOIN org.role r ON r.id = m.role_id`;
 
@@ -34,12 +37,22 @@ export class MembersController {
     return this.db.withTenant(a, async (c) => ({ data: (await c.query(`${SELECT} WHERE m.revoked_at IS NULL ORDER BY m.created_at`)).rows }));
   }
 
-  /** Adds a person by phone. They log in with OTP and see this company in their list. */
+  /**
+   * Adds a person by phone (they log in with OTP) or by email. For a new email account the admin may set a
+   * first password; an existing account keeps its own password. Either way they see this company in their list.
+   */
   @Post()
   @Perm('members:write')
   async add(@Auth() a: AuthContext, @Body() body: MemberInput) {
-    const phone = normalizePhone(body?.phone);
-    if (!phone) throw new BadRequestException('invalid phone');
+    const phone = body?.phone ? normalizePhone(body.phone) : null;
+    const email = !phone && body?.email ? normalizeEmail(body.email) : null;
+    if (body?.phone && !phone) throw new BadRequestException('invalid phone');
+    if (!phone && !email) throw new BadRequestException(body?.email ? 'invalid email' : 'phone or email required');
+    if (body?.password !== undefined) {
+      if (!email) throw new BadRequestException('password is only for email accounts');
+      const p = passwordProblem(body.password); if (p) throw new BadRequestException(p);
+    }
+    const pwHash = email && body?.password ? await hashPassword(body.password) : null;
     return this.db.withTenant(a, async (c) => {
       const role = await this.resolveRole(c, a, body.role_code);
       let scope = await this.validateScope(c, body);
@@ -55,10 +68,17 @@ export class MembersController {
         throw new BadRequestException('customer_id is only for the customer role');
       }
       const departmentId = await this.validateDepartment(c, body.department_id);
-      const u = await c.query(
-        `INSERT INTO org.app_user (id, phone, display_name) VALUES ($1,$2,$3)
-         ON CONFLICT (phone) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name) RETURNING id`,
-        [randomUUID(), phone, body.display_name ?? null]);
+      const u = phone
+        ? await c.query(
+          `INSERT INTO org.app_user (id, phone, display_name) VALUES ($1,$2,$3)
+           ON CONFLICT (phone) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name) RETURNING id`,
+          [randomUUID(), phone, body.display_name ?? null])
+        : await c.query(
+          `INSERT INTO org.app_user (id, email, display_name, password_hash, password_changed_at) VALUES ($1,$2,$3,$4, CASE WHEN $4::text IS NULL THEN NULL ELSE now() END)
+           ON CONFLICT (email) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name),
+             password_hash = COALESCE(org.app_user.password_hash, EXCLUDED.password_hash),
+             password_changed_at = COALESCE(org.app_user.password_changed_at, EXCLUDED.password_changed_at) RETURNING id`,
+          [randomUUID(), email, body.display_name ?? null, pwHash]);
       const id = randomUUID();
       try {
         await c.query(
@@ -70,7 +90,7 @@ export class MembersController {
         throw e;
       }
       await audit(c, { tenantId: a.tenantId, actorId: a.userId, action: 'member.added', targetType: 'membership', targetId: id,
-                       after: { phone, role: role.code, ...scope, valid_until: body.valid_until ?? null, department_id: departmentId } });
+                       after: { phone, email, role: role.code, ...scope, valid_until: body.valid_until ?? null, department_id: departmentId } });
       return (await c.query(`${SELECT} WHERE m.id = $1`, [id])).rows[0];
     });
   }

@@ -90,7 +90,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               {me.tenant_status === 'trial' && <span className="badge t-warning">تجريبي</span>}
             </div>
             <div className="row">
-              <span className="muted">{me.display_name ?? <span className="num">{me.phone}</span>} · {ROLE[me.role] ?? me.role}</span>
+              <span className="muted">{me.display_name ?? <span className="num">{me.email ?? me.phone}</span>} · {ROLE[me.role] ?? me.role}</span>
               <button className="small" onClick={async () => { await session('logout'); location.href = '/login'; }}>خروج</button>
             </div>
           </header>
