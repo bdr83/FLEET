@@ -138,6 +138,9 @@ class TaskScreen extends StatelessWidget {
             trailing: t.requesterPhone == null ? null : IconButton.filledTonal(
               tooltip: 'اتصال', icon: const Icon(Icons.call), onPressed: () => launchUrl(Uri.parse('tel:${t.requesterPhone}'))),
           )),
+        if (t.parcelLine != null)
+          Card(key: const Key('parcel-card'), child: ListTile(leading: const Icon(Icons.inventory_2_outlined), title: Ltr(t.awb!),
+              subtitle: Text(t.attempt > 1 ? '${t.parcelLine!}\nمحاولة تسليم جديدة بعد محاولة لم تنجح' : t.parcelLine!))),
         if (!t.isConcrete && !t.isStaffing && !t.isInternal && (t.recipientName != null || t.recipientPhone != null))
           Card(child: ListTile(
             leading: const Icon(Icons.person_outline),

@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -351,3 +351,17 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /v1/coldchain/report?from&to` | لكل مسار وإجمالي: الالتزام بالنافذة، قيمة المسلَّم والتالف والمرتجع، نسبة التلف = تالف ÷ (مسلَّم + تالف)، نسبة المرتجعات، توقفات في الساعة، ونسبة القراءات ضمن النطاق |
 
 أسباب تعذر إضافية: `temp_out_of_range`، `expired`، `late_window`.
+
+## قطاع البريد والشحن السريع courier (القطاع 4)
+
+كل شحنة مهمة توصيل `delivery@1` واحدة (فيبقى الإسناد وتطبيق السائق ورمز المستلم والدفع عند الاستلام ورابط التتبع من قطاع التوصيل) مع بوليصة في `ops.courier_parcel`. النشاط `courier` يفتح «البريد السريع» و«مركز التوصيل». مبالغ الدفع عند الاستلام في دفاتر النواة (`billing.cod_collection` و`POST /v1/cod/payouts` للمرسل).
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/courier/hubs`، `PATCH /v1/courier/hubs/:id` | المحطات (رمز فريد مثل KWI)، مع عدد الشحنات الموجودة فيها |
+| `POST /v1/courier/parcels` | حجز شحنة: `{legal_entity_id, customer_id? (المرسل), awb? (يُولَّد KW + 10 أرقام), service: express\|same_day\|next_day, pieces, weight_kg?, origin_hub_id?, dest_hub_id?, max_attempts? (3), recipient {name, phone}, dropoff {area, ...}, cod_amount?, delivery_fee?, notes?}`. الموعد: سريع 4 ساعات، نفس اليوم 23:59، اليوم التالي 23:59 من الغد بتوقيت الكويت [تخمين]. الدفع عند الاستلام يحتاج المرسل |
+| `GET /v1/courier/parcels?q&hub_id&where` | قائمة بمكان كل شحنة (`at_hub`، `in_transit`، `with_driver`، `delivered`، `rto_done`) والمحاولات الفاشلة |
+| `GET /v1/courier/parcels/:id أو :awb` | التفاصيل مع المسح في المحطات وأحداث المهمة (الفشل بسببه واسم المندوب) ورمز رابط التتبع |
+| `POST /v1/courier/scans` | مسح دفعة `{hub_id, event: received\|sorted\|dispatched\|arrived\|returned\|rto_out, awbs[≤500], rto?, note?}`؛ نتيجة لكل بوليصة (`unknown_awb`، `closed`، `with_driver`، `awaiting_return`، `not_failed`، `not_rto`). «returned» بعد محاولة فاشلة يعيد المهمة لقائمة الإسناد ويزيد رقم المحاولة ما بقيت محاولات، وإلا (أو مع `rto: true`) يقرر الإرجاع للمرسل؛ «rto_out» يسجل تسليمها للمرسل |
+| `GET /v1/courier/exceptions` | تجاوزت موعدها، راكدة في محطة بلا مسح منذ 24 ساعة [تخمين]، فشلت ولم تعد للمحطة، تنتظر الإرجاع للمرسل |
+| `GET /v1/courier/report?from&to` | للشحنات المحجوزة في الفترة، حسب الخدمة والمرسل: نسبة التسليم، من أول محاولة، في الموعد، نسبة الإرجاع، COD المحصّل |
