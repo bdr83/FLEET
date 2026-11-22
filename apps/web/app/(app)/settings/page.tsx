@@ -5,12 +5,13 @@ import { dt, ROLE } from '@/lib/format';
 import { can, useMe } from '@/components/me';
 import { Badge, clean, Empty, ErrorBox, Modal, Tabs, useAction, useForm, useLoad } from '@/components/ui';
 
-type Tab = 'company' | 'members' | 'branches' | 'audit';
+type Tab = 'company' | 'members' | 'branches' | 'audit' | 'account';
 
 export default function SettingsPage() {
   const me = useMe();
   const tabs: [Tab, string][] = [['company', 'الشركة والفوترة'], ['branches', 'الفروع']];
   if (can(me, 'members:read')) tabs.splice(1, 0, ['members', 'المستخدمون والصلاحيات']), tabs.push(['audit', 'سجل التدقيق']);
+  tabs.push(['account', 'حسابي']);
   const [tab, setTab] = useState<Tab>('company');
   return (
     <div className="page stack">
@@ -20,7 +21,33 @@ export default function SettingsPage() {
       {tab === 'members' && <Members />}
       {tab === 'branches' && <Branches />}
       {tab === 'audit' && <Audit />}
+      {tab === 'account' && <Account />}
     </div>
+  );
+}
+
+function Account() {
+  const me = useMe();
+  const { f, bind, setF } = useForm({ current_password: '', new_password: '' });
+  const { busy, error, run } = useAction();
+  const [done, setDone] = useState(false);
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault(); setDone(false);
+    void run(async () => {
+      await api('/auth/password/change', { method: 'POST', body: f });
+      setF({ current_password: '', new_password: '' }); setDone(true);
+    });
+  };
+  return (
+    <form className="form card" onSubmit={submit} style={{ maxWidth: 420 }}>
+      <h2>تغيير كلمة المرور</h2>
+      {me.email && <p className="muted" style={{ margin: 0 }}>الحساب: <span dir="ltr">{me.email}</span></p>}
+      <ErrorBox error={error} />
+      {done && <div className="alert ok">تم تغيير كلمة المرور</div>}
+      <label className="field">كلمة المرور الحالية<input {...bind('current_password')} type="password" autoComplete="current-password" dir="ltr" /></label>
+      <label className="field">كلمة المرور الجديدة <span className="muted">(8 أحرف على الأقل)</span><input {...bind('new_password')} type="password" autoComplete="new-password" dir="ltr" minLength={8} required /></label>
+      <div><button className="primary" disabled={busy}>حفظ</button></div>
+    </form>
   );
 }
 
@@ -64,7 +91,7 @@ function EntityCard({ e, write, onSaved }: { e: Entity; write: boolean; onSaved:
   );
 }
 
-interface Member { id: string; phone: string; display_name: string | null; role: string; customer_id: string | null; valid_until: string | null; created_at: string; user_id: string }
+interface Member { id: string; phone: string | null; email: string | null; display_name: string | null; role: string; customer_id: string | null; valid_until: string | null; created_at: string; user_id: string }
 const ASSIGNABLE = ['admin', 'dispatcher', 'accountant', 'branch_supervisor', 'driver', 'employee', 'customer', 'owner'];
 function Members() {
   const me = useMe();
@@ -76,15 +103,15 @@ function Members() {
   const changeRole = (m: Member, role_code: string) => act.run(async () => { await api(`/members/${m.id}`, { method: 'PATCH', body: { role_code } }); await list.reload(); });
   return <>
     {write && <div><button className="primary" onClick={() => setAdding(true)}>إضافة مستخدم</button></div>}
-    <p className="muted" style={{ margin: 0 }}>يدخل المستخدم برقم جواله ورمز التحقق ويرى شركتك في قائمته. السائقون يُضافون من صفحة السائقين.</p>
+    <p className="muted" style={{ margin: 0 }}>يدخل المستخدم ببريده وكلمة المرور (أو برقم جواله) ويرى شركتك في قائمته. السائقون يُضافون من صفحة السائقين.</p>
     <ErrorBox error={list.error ?? act.error} />
     {list.data?.length === 0 ? <Empty>لا يوجد مستخدمون</Empty> : (
       <div className="tbl-wrap"><table>
-        <thead><tr><th>الاسم</th><th>الجوال</th><th>الدور</th><th>أضيف</th><th></th></tr></thead>
+        <thead><tr><th>الاسم</th><th>البريد أو الجوال</th><th>الدور</th><th>أضيف</th><th></th></tr></thead>
         <tbody>{list.data?.map((m) => (
           <tr key={m.id}>
             <td>{m.display_name ?? '—'}{m.user_id === me.user_id && <> <Badge tone="info">أنت</Badge></>}</td>
-            <td className="num">{m.phone}</td>
+            <td className="num" dir="ltr" style={{ textAlign: 'right' }}>{m.email ?? m.phone}</td>
             <td>{write && m.user_id !== me.user_id && m.role !== 'customer' && m.role !== 'driver'
               ? <select aria-label="الدور" value={m.role} onChange={(e) => changeRole(m, e.target.value)} disabled={act.busy} style={{ width: 'auto' }}>
                   {ASSIGNABLE.filter((r) => r !== 'customer' && r !== 'driver').map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}
@@ -102,14 +129,16 @@ function Members() {
 
 function AddMember({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const me = useMe();
-  const { f, bind } = useForm({ phone: '', display_name: '', role_code: 'dispatcher', customer_id: '' });
+  const { f, bind } = useForm({ by: 'email', email: '', password: '', phone: '', display_name: '', role_code: 'dispatcher', customer_id: '' });
   const customers = useLoad(() => f.role_code === 'customer' ? api<{ data: { id: string; name: string }[] }>('/customers?status=active').then((r) => r.data) : Promise.resolve([]), [f.role_code]);
   const { busy, error, run } = useAction();
   const roles = ASSIGNABLE.filter((r) => r !== 'driver' && (r !== 'owner' || me.role === 'owner'));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      await api('/members', { method: 'POST', body: clean({ ...f, customer_id: f.role_code === 'customer' ? f.customer_id : '' }) });
+      const { by, ...rest } = f;
+      const login = by === 'email' ? { phone: '' } : { email: '', password: '' };
+      await api('/members', { method: 'POST', body: clean({ ...rest, ...login, customer_id: f.role_code === 'customer' ? f.customer_id : '' }) });
       onDone();
     });
   };
@@ -118,7 +147,13 @@ function AddMember({ onClose, onDone }: { onClose: () => void; onDone: () => voi
       <form className="form" onSubmit={submit}>
         <ErrorBox error={error} />
         <div className="form-2">
-          <label className="field">الجوال<input {...bind('phone')} className="num" inputMode="tel" required placeholder="+965 5xxx xxxx" /></label>
+          <label className="field">طريقة الدخول<select {...bind('by')}><option value="email">البريد وكلمة المرور</option><option value="phone">رقم الجوال</option></select></label>
+          {f.by === 'email' ? <>
+            <label className="field">البريد الإلكتروني<input {...bind('email')} type="email" dir="ltr" required /></label>
+            <label className="field">كلمة مرور أولى <span className="muted">(8 أحرف على الأقل، يغيّرها لاحقًا)</span><input {...bind('password')} type="text" dir="ltr" minLength={8} autoComplete="off" /></label>
+          </> : (
+            <label className="field">الجوال<input {...bind('phone')} className="num" inputMode="tel" required placeholder="+965 5xxx xxxx" /></label>
+          )}
           <label className="field">الاسم<input {...bind('display_name')} maxLength={120} /></label>
           <label className="field">الدور<select {...bind('role_code')}>{roles.map((r) => <option key={r} value={r}>{ROLE[r]}</option>)}</select></label>
           {f.role_code === 'customer' && (

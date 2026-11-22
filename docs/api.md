@@ -8,10 +8,18 @@
 |---|---|---|
 | POST | `/auth/otp/request` | `{phone}` يرسل رمزًا من 6 أرقام (5 دقائق، 5 محاولات، فاصل 60 ثانية، 5 في الساعة) |
 | POST | `/auth/otp/verify` | `{phone, code}` → `user_token` (10 دقائق) + قائمة الشركات |
+| POST | `/auth/register` | `{email, password, display_name?}` حساب جديد (كلمة مرور 8 أحرف على الأقل، تُخزن scrypt) → `user_token` + قائمة الشركات؛ بريد مستخدم = 409 |
+| POST | `/auth/login` | `{email, password}` → `user_token` + قائمة الشركات؛ 10 محاولات خاطئة تقفل الحساب 15 دقيقة (429) |
+| POST | `/auth/password/forgot` | `{email}` يرسل رابط استعادة صالحًا ساعة لمرة واحدة؛ الرد نفسه للبريد غير المسجل؛ 503 `email_unavailable` بلا SMTP |
+| POST | `/auth/password/reset` | `{token, password}` → `user_token` + قائمة الشركات |
+| POST | `/auth/password/change` | `{current_password, new_password}` بـ access_token |
+| GET | `/auth/methods` | `{password: true, password_reset}` لصفحة الدخول |
 | GET | `/auth/memberships` | بـ user_token |
 | POST | `/auth/token` | `{tenant_id}` بـ user_token → `access_token` (15 دقيقة) + `refresh_token` (30 يومًا) |
 | POST | `/auth/refresh` | تدوير؛ إعادة استخدام رمز قديم تلغي كل جلسات المستخدم في الشركة |
 | POST | `/auth/logout` | يلغي refresh token |
+
+إضافة عضو (`POST /members`) تقبل `phone` أو `email`، ومع البريد كلمة مرور أولى اختيارية `password` تُطبَّق فقط إن لم يكن للحساب كلمة مرور.
 
 ## المؤسسة
 

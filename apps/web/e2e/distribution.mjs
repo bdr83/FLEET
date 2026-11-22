@@ -33,6 +33,7 @@ const call = (method, path, body) => page.evaluate(async ([m, p, b]) => {
 try {
   const owner = `+9655${stamp}`;
   await page.goto(`${WEB}/login`);
+  await page.click('button:has-text("الدخول برقم الجوال")');
   await page.fill('input[name=phone]', owner);
   await page.click('button:has-text("إرسال رمز التحقق")');
   await page.fill('input[name=code]', (await page.locator('.alert.ok .num').textContent()).trim());

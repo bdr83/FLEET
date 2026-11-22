@@ -27,6 +27,7 @@ jobs:
           SMS_HTTP_URL: ${{ secrets.SMS_HTTP_URL }}
           SMS_HTTP_HEADERS: ${{ secrets.SMS_HTTP_HEADERS }}
           SMS_HTTP_BODY: ${{ secrets.SMS_HTTP_BODY }}
+          SMTP_URL: ${{ secrets.SMTP_URL }}
         run: |
           printf '%s\n' "$SERVER_ENV" | tr -d '\r' | grep -q '^APP_DOMAIN=' || { echo "SERVER_ENV must contain APP_DOMAIN and API_DOMAIN"; exit 1; }
           mkdir -p /opt/fleet/deploy
@@ -36,7 +37,7 @@ jobs:
           {
             printf '%s\n' "$SERVER_ENV" | tr -d '\r' | grep -E '^[A-Z_][A-Z0-9_]*=' || true
             if [ -n "$SMS_HTTP_URL" ]; then echo "SMS_PROVIDER=http"; echo "SMS_HTTP_URL=$SMS_HTTP_URL"; fi
-            echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"; echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"
+            echo "SMS_HTTP_HEADERS=$SMS_HTTP_HEADERS"; echo "SMS_HTTP_BODY=$SMS_HTTP_BODY"; echo "SMTP_URL=$SMTP_URL"
           } > /opt/fleet/deploy/config.env
       - name: Pull and start
         env:
