@@ -12,6 +12,7 @@ export const PACKS = [
   { code: 'rental', sector: 17, label: 'تأجير السيارات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي' },
+  { code: 'service', sector: 22, label: 'الصيانة الفنية' },
   { code: 'distribution', sector: 29, label: 'التوزيع للمصانع والمطاعم والتجزئة' },
 ] as const;
 export type PackCode = (typeof PACKS)[number]['code'];

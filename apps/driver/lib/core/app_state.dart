@@ -266,6 +266,15 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Service visit: the result, the work done, the parts used and the customer's name; checked online at once, then ends the visit.
+  Future<String?> serviceDone(String taskId, {required String result, required String workDone, required String signedBy, List<Map<String, dynamic>> parts = const []}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_done', 'result': result, 'note': workDone, 'received_by': signedBy, 'parts': parts}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'work_done'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Rental car: handed over to the renter (odometer, fuel, the renter's name) or taken back; checked online at once, then ends the task.
   Future<String?> rentalStep(String taskId, {required bool collect, required int odometerKm, int? fuel, String? receivedBy}) async {
     final code = collect ? 'collected' : 'handover';

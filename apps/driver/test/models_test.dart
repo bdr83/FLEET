@@ -246,6 +246,22 @@ void main() {
     expect(task('assigned', pack: 'rental@1', attrs: {'kind': 'rental'}).isRental, false);
   });
 
+  test('service visit: arrive, result, labels, part quantities', () {
+    final t = task('assigned', pack: 'service@1', attrs: {'kind': 'visit', 'category': 'ac', 'priority': 'urgent', 'problem': 'المكيف لا يبرد', 'address': 'مشرف، ق 3', 'previous': ['1: فحص']});
+    expect((t.isService, t.urgent, t.problem, t.address), (true, true, 'المكيف لا يبرد', 'مشرف، ق 3'));
+    expect(t.previousVisits, ['1: فحص']);
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.start]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.arrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'arrived')), [TaskAction.workDone, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'work_done')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.arrived), 'وصلت للموقع');
+    expect(failReasonsFor(t), serviceFailReasons);
+    expect(parseQty('1.5'), 1.5);
+    expect(parseQty('٢'), 2);
+    expect(parseQty('0'), isNull);
+    expect(parseQty('1.234'), isNull);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

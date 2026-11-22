@@ -104,6 +104,13 @@ class DriverTask {
   /// Car rental (rental pack): deliver the car to the renter (odometer, fuel, the renter's name) or collect it back.
   bool get isRental => sectorPack == 'rental@1' && (attributes['kind'] == 'deliver' || attributes['kind'] == 'collect');
   bool get isCollect => attributes['kind'] == 'collect';
+  /// A technician's visit (service pack): arrive, then the result with the work done, the parts and the customer's name.
+  bool get isService => sectorPack == 'service@1';
+  String? get problem => attributes['problem'] as String?;
+  String? get category => attributes['category'] as String?;
+  bool get urgent => attributes['priority'] == 'urgent';
+  Map<String, dynamic>? get unit => _map(attributes['unit']);
+  List<String> get previousVisits => [for (final x in (attributes['previous'] as List? ?? const [])) if (x is String) x];
   String? get rentalRef => attributes['rental_ref'] as String?;
   String? get renterName => attributes['renter_name'] as String?;
   String? get renterPhone => attributes['renter_phone'] as String?;
@@ -159,7 +166,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -233,7 +240,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -242,6 +249,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isInternal) return _internalActions(t);
   if (t.isEquipment) return _equipmentActions(t);
   if (t.isRental) return _rentalActions(t);
+  if (t.isService) return _serviceActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -361,6 +369,20 @@ List<TaskAction> _rentalActions(DriverTask t) {
   }
 }
 
+/// Service visit: accept → on the way → arrived → the result (work, parts, customer) → done.
+List<TaskAction> _serviceActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return t.stage == 'work_done' ? [TaskAction.complete] : t.stage == 'arrived' ? [TaskAction.workDone, TaskAction.fail] : [TaskAction.arrived, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
 /// Distribution route: accept → check the load (odometer) → leave the depot → (stops) → back at the depot (odometer) → done.
 List<TaskAction> _routeActions(DriverTask t) {
   switch (t.status) {
@@ -390,9 +412,41 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                     ? (shuttleActionLabels[a] ?? actionLabels[a]!)
                     : t.isEquipment
                         ? (equipmentActionLabels[a] ?? actionLabels[a]!)
-                        : t.isRental
+                        : t.isService
+                            ? (serviceActionLabels[a] ?? actionLabels[a]!)
+                            : t.isRental
                             ? ((t.isCollect && a == TaskAction.start ? 'انطلقت لاستلام السيارة' : null) ?? rentalActionLabels[a] ?? actionLabels[a]!)
                             : actionLabels[a]!;
+
+const serviceActionLabels = {
+  TaskAction.accept: 'قبول الزيارة',
+  TaskAction.start: 'انطلقت للعميل',
+  TaskAction.arrived: 'وصلت للموقع',
+  TaskAction.workDone: 'انتهت الزيارة',
+  TaskAction.fail: 'تعذّرت الزيارة',
+};
+
+/// Same codes as the API (service FAIL_REASONS).
+const serviceFailReasons = {
+  'customer_absent': 'العميل غير موجود',
+  'no_access': 'تعذّر الدخول للموقع',
+  'customer_canceled': 'ألغى العميل',
+  'other': 'سبب آخر',
+};
+
+const serviceCategoryLabels = {'ac': 'تكييف', 'electrical': 'كهرباء', 'plumbing': 'سباكة', 'appliance': 'أجهزة منزلية', 'elevator': 'مصاعد', 'generator': 'مولدات', 'other': 'أخرى'};
+const serviceResultLabels = {'fixed': 'تم الإصلاح', 'follow_up': 'يحتاج زيارة أخرى', 'not_fixed': 'لم يُصلح'};
+
+/// A quantity of a part typed by the technician: more than 0, up to two decimals (Arabic digits and comma accepted).
+double? parseQty(String s) {
+  final t = s.trim().replaceAll('٫', '.').replaceAll(',', '.').split('').map((c) {
+    final i = '٠١٢٣٤٥٦٧٨٩'.indexOf(c);
+    return i >= 0 ? '$i' : c;
+  }).join();
+  if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(t)) return null;
+  final n = double.parse(t);
+  return n > 0 ? n : null;
+}
 
 const rentalActionLabels = {
   TaskAction.accept: 'قبول المهمة',
@@ -607,7 +661,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -689,6 +743,9 @@ const rejectReasons = {
   'meter_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمعدة',
   'meter_invalid': 'قراءة الانتهاء يجب أن تكون بعد قراءة البدء وخلال 24 ساعة',
   'signer_required': 'اكتب اسم مشرف الموقع',
+  'result_required': 'اختر نتيجة الزيارة',
+  'work_required': 'اكتب ما تم من عمل',
+  'parts_invalid': 'تحقق من القطع والكميات',
   'vehicle_still_out': 'السيارة ما زالت مؤجرة لعميل آخر',
   'vehicle_out_of_service': 'السيارة خارج الخدمة',
 };

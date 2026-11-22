@@ -61,6 +61,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'rental', sector: 17, label: 'تأجير السيارات', hint: 'حجوزات وعقود إيجار، استلام وإرجاع بالعدّاد والوقود، رسوم الكيلومترات والوقود والأضرار، توصيل للعميل، المخالفات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
+  { code: 'service', sector: 22, label: 'الصيانة الفنية', hint: 'بلاغات صيانة بأولوية وموعد استجابة، زيارات الفنيين، القطع المستخدمة، الصيانة الدورية' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -290,3 +291,13 @@ export const FINE_STATUS: Record<string, { label: string; tone: string }> = {
   open: { label: 'مفتوحة', tone: 'warning' }, charged: { label: 'على المستأجر', tone: 'info' }, waived: { label: 'معفاة', tone: 'muted' }, paid_by_us: { label: 'دفعتها الشركة', tone: 'muted' },
 };
 export const RENTAL_TYPES = ['car', 'van', 'pickup', 'motorbike', 'bus', 'truck'];
+
+/** Technical maintenance (service pack) labels. */
+export const SVC_CATEGORY: Record<string, string> = { ac: 'تكييف', electrical: 'كهرباء', plumbing: 'سباكة', appliance: 'أجهزة منزلية', elevator: 'مصاعد', generator: 'مولدات', other: 'أخرى' };
+export const SVC_KIND: Record<string, string> = { repair: 'إصلاح', install: 'تركيب', preventive: 'صيانة دورية' };
+export const SVC_PRIORITY: Record<string, { label: string; tone: string }> = { urgent: { label: 'عاجل', tone: 'danger' }, normal: { label: 'عادي', tone: 'info' }, low: { label: 'منخفض', tone: 'muted' } };
+export const SVC_STATE: Record<string, { label: string; tone: string }> = {
+  new: { label: 'بانتظار فني', tone: 'warning' }, scheduled: { label: 'زيارة محجوزة', tone: 'info' }, on_site: { label: 'الفني في الموقع', tone: 'success' },
+  follow_up: { label: 'يحتاج زيارة أخرى', tone: 'warning' }, to_close: { label: 'جاهز للإغلاق', tone: 'info' }, closed: { label: 'مغلق', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const SVC_RESULT: Record<string, { label: string; tone: string }> = { fixed: { label: 'تم الإصلاح', tone: 'success' }, follow_up: { label: 'زيارة أخرى', tone: 'warning' }, not_fixed: { label: 'لم يُصلح', tone: 'danger' } };

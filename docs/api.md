@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment، rental) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -471,3 +471,24 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | العقود المغلقة حسب العميل (أيام، كم، إيجار، كم زائد، وقود، أضرار، إجمالي)، واستغلال كل سيارة، والمخالفات |
 
 السائق: مهمة `rental@1` من نوع `deliver` أو `collect` تحمل في `attributes` الحقول `rental_ref`، `plate_no`، `renter_name`، `renter_phone`، `address`. محطة `handover` (للتوصيل) أو `collected` (للاستلام) في `POST /v1/driver/sync` تُقبل أثناء المهمة، وتحتاج `odometer_km` و`fuel`. وتحتاج `handover` أيضًا `received_by`. وهي نفس التسليم والإرجاع في الفرع. إنهاء المهمة يحتاج المحطة. رموز الرفض: `odometer_required`، `odometer_too_low`، `receiver_required`، `vehicle_still_out`، `vehicle_booked`.
+
+## قطاع الصيانة الفنية service (القطاع 22)
+
+البلاغ (أمر عمل `WO-n`) يطلب من فني زيارة موقع عميل لإصلاح جهاز أو تركيبه أو صيانته. التخصصات: تكييف، كهرباء، سباكة، أجهزة منزلية، مصاعد، مولدات. موعد الاستجابة حسب الأولوية: عاجل 4 ساعات، عادي 24، منخفض 72 [تخمين]. كل زيارة مهمة `service@1` تحجز الفني (وسيارة إن وُجدت) حصريًا لنافذتها، وكل بلاغ فيه زيارة مفتوحة واحدة في الوقت نفسه. الفني يسجّل الوصول، ثم نتيجة الزيارة (`fixed` أُصلح، `follow_up` يحتاج زيارة أخرى، `not_fixed` لم يُصلح) مع وصف العمل والقطع المستخدمة واسم العميل. المكتب يغلق البلاغ بمبلغ العمالة والقطع. عقود الصيانة الدورية تولّد بلاغات وقائية قبل موعدها بأسبوع [تخمين].
+
+حالة البلاغ تُحسب من زياراته: `new` بانتظار فني، `scheduled`، `on_site`، `follow_up`، `to_close`، `closed`، `canceled`.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/service/jobs` | `{legal_entity_id, customer_id, site{name?, area, block?, street?, phone?}, category, kind? repair\|install\|preventive, priority? urgent\|normal\|low, problem, unit?{brand, model, serial, location}, due_by?}` |
+| `GET /jobs/:id` | البلاغ مع الزيارات والقطع |
+| `POST /jobs/:id/visits` | `{technician_worker_id, starts_at?, duration_min? (120 [تخمين]), asset_id?}`. 409 `technician_booked` أو `vehicle_booked` أو زيارة مفتوحة |
+| `POST /visits/:taskId/record` | تسجيل المكتب من بطاقة العمل `{result, work_done, signed_by?, parts[{name, qty}], arrived_at?}` |
+| `POST /jobs/:id/close` | `{labour_amount?, parts_amount?, outcome?}` بعد آخر زيارة |
+| `POST /jobs/:id/cancel` | `{reason}` ما لم يكن الفني في الموقع |
+| `GET /board?date` | زيارات اليوم والبلاغات بانتظار فني |
+| `GET/POST /plans`، `POST /plans/:id/stop`، `POST /plans/generate` | عقد دوري `{customer_id, name, site, category, every_days 7-366, first_due, ends_on?, tasks_note?}`. التوليد `{date?}` يعيد `{created}` |
+| `GET /exceptions` | تجاوز موعد الاستجابة بلا وصول، بلا فني، تحتاج زيارة أخرى، جاهزة للإغلاق، أعطال متكررة خلال 30 يومًا من إصلاح [تخمين] |
+| `GET /report?from&to` | البلاغات، الوصول في الموعد، الإصلاح من أول زيارة، متوسط الاستجابة، العمالة والقطع، حسب الفني والتخصص |
+
+الفني: تحمل مهمة `service@1` في `attributes` الحقول `job_ref`، `seq`، `category`، `priority`، `problem`، `unit`، `address`، `contact_phone`، `previous` (ملخص آخر الزيارات). في `POST /v1/driver/sync`: محطة `arrived`، ثم `work_done` مع `result` و`note` (ما تم من عمل) و`received_by` (اسم العميل) و`parts`. إنهاء المهمة يحتاج `work_done`. رموز الرفض: `result_required`، `work_required`، `signer_required`، `parts_invalid`.
