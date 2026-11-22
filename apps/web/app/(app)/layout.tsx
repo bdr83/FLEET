@@ -14,6 +14,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string }[] = [
   { href: '/concrete', label: 'جدول الصب', perm: 'tasks:read' },
   { href: '/staffing', label: 'لوحة الإسناد', perm: 'tasks:read' },
   { href: '/internal', label: 'أسطول الشركة', perm: 'tasks:read' },
+  { href: '/distribution', label: 'التوزيع اليومي', perm: 'tasks:read' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },

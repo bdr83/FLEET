@@ -97,6 +97,16 @@ class DriverTask {
   String? get requester => attributes['requester'] as String?;
   String? get requesterPhone => attributes['requester_phone'] as String?;
   int? get passengers => attributes['passengers'] is num ? (attributes['passengers'] as num).toInt() : null;
+  /// Own-fleet distribution: the day's route (load list, depart, back at the depot) and its stops (deliver, returns, cash).
+  bool get isDistribution => sectorPack == 'distribution@1';
+  bool get isRoute => isDistribution && attributes['kind'] == 'route';
+  bool get isStop => isDistribution && attributes['kind'] == 'stop';
+  String? get routeRef => attributes['route_ref'] as String?;
+  int? get seq => attributes['seq'] is num ? (attributes['seq'] as num).toInt() : null;
+  bool get payCash => attributes['payment'] == 'cash';
+  int get stopsCount => attributes['stops'] is num ? (attributes['stops'] as num).toInt() : 0;
+  List<DistItem> get distItems => [for (final i in (attributes['items'] as List? ?? const [])) if (i is Map) DistItem.fromJson(Map<String, dynamic>.from(i))];
+  List<DistItem> get loadList => [for (final i in (attributes['load'] as List? ?? const [])) if (i is Map) DistItem.fromJson(Map<String, dynamic>.from(i))];
   String? get shift => attributes['shift'] as String?;
   String? get workDate => attributes['work_date'] as String?;
   String? get requestRef => attributes['request_ref'] as String?;
@@ -112,7 +122,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -178,12 +188,14 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack }
+enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
   if (t.isStaffing) return _staffingActions(t, now ?? DateTime.now());
   if (t.isInternal) return _internalActions(t);
+  if (t.isRoute) return _routeActions(t);
+  if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
     case 'assigned':
       return [TaskAction.accept];
@@ -255,6 +267,20 @@ List<TaskAction> _internalActions(DriverTask t) {
   }
 }
 
+/// Distribution route: accept → check the load (odometer) → leave the depot → (stops) → back at the depot (odometer) → done.
+List<TaskAction> _routeActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return t.stage == null ? [TaskAction.loadChecked] : [TaskAction.depart];
+    case 'in_progress':
+      return t.stage == 'route_back' ? [TaskAction.complete] : [TaskAction.routeBack];
+    default:
+      return [];
+  }
+}
+
 /// The button text, worded for the kind of task.
 String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
     ? (concreteActionLabels[a] ?? actionLabels[a]!)
@@ -262,7 +288,42 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
         ? (staffingActionLabels[a] ?? actionLabels[a]!)
         : t.isInternal
             ? (internalActionLabels[a] ?? actionLabels[a]!)
-            : actionLabels[a]!;
+            : t.isDistribution
+                ? (distActionLabels[a] ?? actionLabels[a]!)
+                : actionLabels[a]!;
+
+const distActionLabels = {
+  TaskAction.accept: 'قبول المسار',
+  TaskAction.loadChecked: 'راجعت الحمولة',
+  TaskAction.depart: 'انطلقت من المستودع',
+  TaskAction.routeBack: 'عدت للمستودع',
+  TaskAction.complete: 'إنهاء المسار',
+  TaskAction.stopDeliver: 'تسليم',
+  TaskAction.fail: 'تعذّر التسليم',
+};
+
+/// A product line of a stop or of the load list.
+class DistItem {
+  DistItem({required this.sku, required this.name, required this.qty, this.price});
+  factory DistItem.fromJson(Map<String, dynamic> j) => DistItem(sku: j['sku'] as String, name: (j['name'] as String?) ?? j['sku'] as String, qty: _num(j['qty']) ?? 0, price: j['price'] as String?);
+  final String sku;
+  final String name;
+  final double qty;
+  final String? price;
+  int get priceFils => moneyToFils(price);
+}
+
+/// Value of quantities at the stop's prices, in fils (what a cash customer pays).
+int distValueFils(List<DistItem> items, Map<String, double> qty) {
+  var total = 0;
+  for (final i in items) {
+    total += ((qty[i.sku] ?? 0) * 1000).round() * i.priceFils ~/ 1000;
+  }
+  return total;
+}
+
+/// "12" / "2.5" with up to 3 decimals.
+String qtyText(double q) => q == q.roundToDouble() ? q.toInt().toString() : q.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '');
 
 const internalActionLabels = {
   TaskAction.accept: 'قبول المشوار',
@@ -324,6 +385,8 @@ const stageLabels = {
   'check_out': 'سجّل الانصراف',
   'vehicle_out': 'المركبة معك',
   'vehicle_back': 'أُرجعت المركبة',
+  'load_checked': 'الحمولة جاهزة',
+  'route_back': 'عاد للمستودع',
 };
 
 /// Same codes as the API (staffing FAIL_REASONS).
@@ -336,13 +399,22 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
   'vehicle_breakdown': 'عطل في المركبة',
   'accident': 'حادث',
   'trip_canceled': 'أُلغي المشوار',
+  'other': 'سبب آخر',
+};
+
+/// Same codes as the API (distribution FAIL_REASONS) offered at a stop.
+const distFailReasons = {
+  'shop_closed': 'المحل مغلق',
+  'refused': 'رفض الاستلام',
+  'no_cash': 'لا يوجد نقد',
+  'no_space': 'لا مكان للتخزين',
   'other': 'سبب آخر',
 };
 
@@ -394,4 +466,10 @@ const rejectReasons = {
   'odometer_required': 'أدخل قراءة العدّاد',
   'odometer_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمركبة',
   'vehicle_booked': 'المركبة محجوزة لمشوار آخر قبل موعدك',
+  'route_not_started': 'ابدأ المسار من المستودع أولًا',
+  'stops_open': 'سجّل كل التوقفات قبل العودة',
+  'stop_already_recorded': 'التوقف مسجّل مسبقًا',
+  'quantity_exceeds_plan': 'الكمية أكثر من المخطط لهذا التوقف',
+  'item_not_planned': 'صنف غير مخطط لهذا التوقف',
+  'cash_required': 'أدخل المبلغ المحصّل',
 };

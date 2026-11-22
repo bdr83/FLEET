@@ -282,3 +282,21 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /v1/internal/costs?from&to` | `reports:read` | لكل إدارة: المشاوير، الكم، ساعات السائق، التكلفة، المصروفات المعتمدة أثناء المشوار، الإجمالي |
 
 تطبيق السائق (مشوار مع سائق): `task_status accepted` ← `milestone vehicle_out {odometer_km, fuel?}` ← `in_progress` ← `milestone vehicle_back {odometer_km, fuel?}` ← `completed`. أسباب الرفض الجديدة: `odometer_required`، `odometer_too_low`، `vehicle_booked`. مشوار يتعذّر في الطريق يبقى «مع الموظف» حتى يسجّل المكتب الإرجاع، والمهمة تبقى فاشلة.
+
+## قطاع التوزيع الذاتي distribution@1 (القطاع 29)
+
+المسار يمر بـ `planned → loaded → out → back → settled` أو `canceled`. المسار مهمة `distribution@1` (`attributes.kind = route`) بإسناد حصري للمركبة والسائق لنافذة اليوم (افتراضيًا 06:00–18:00 بتوقيت الشركة)، وكل توقف مهمة (`kind = stop`، مرجعها `DR-n-seq`) بإسناد للسائق غير حصري. الكميات حتى 3 منازل عشرية، والمبالغ بالدينار حتى 3 منازل.
+
+| الطريق | الصلاحية | ما يفعله |
+|---|---|---|
+| `GET/POST /v1/distribution/products`، `PATCH :id` | `tasks:read` / `tasks:write` | الأصناف: `sku` فريد لكل شركة، الاسم، الوحدة (piece, carton, crate, kg, liter, bag)، السعر |
+| `POST /v1/distribution/routes` | `tasks:assign` | `{legal_entity_id, route_date, asset_id, driver_worker_id, start_time?, end_time?, stops:[{name, customer_id?, address?, payment?, items:[{sku, qty}]}]}`؛ 409 إن كانت المركبة أو السائق محجوزين ذلك اليوم |
+| `GET /v1/distribution/routes?date=` و`/:id` | `tasks:read` | القائمة، والتفاصيل بالتوقفات وقائمة التحميل والمطابقة وفرق النقد |
+| `POST /v1/distribution/routes/:id/cancel` | `tasks:assign` | قبل الانطلاق فقط (`planned` أو `loaded`)، مع سبب |
+| `POST /v1/distribution/routes/:id/settle` | `billing:write` | `{version, cash_received, note?}` بعد العودة؛ الملاحظة إلزامية إن خالف المستلَم المحصَّل |
+| `POST /v1/distribution/stops/:taskId/proof` | `tasks:write` | المكتب يسجّل التوقف نيابة عن السائق: `{delivered, returned?, cash_collected?, received_by?}` أو `{closed_reason}` |
+| `GET /v1/distribution/board?date=` | `tasks:read` | مسارات اليوم وتقدّمها |
+| `GET /v1/distribution/exceptions` | `tasks:read` | لم تُراجع الحمولة، متأخر، لم يُسوَّ، فرق نقد، تسليم ناقص، توقف متعذّر، مرتجعات |
+| `GET /v1/distribution/report?from&to` | `reports:read` | لكل مسار في الفترة: التوقفات المنجزة والمتعذّرة، الكم، قيمة المخطط والمسلَّم والمرتجع، النقد المستحق والمحصّل، مع المجاميع |
+
+تطبيق السائق: على المسار `task_status accepted` ← `milestone load_checked {odometer_km}` ← `in_progress` (فتنتقل التوقفات إلى «مقبولة») ← نوع عملية جديد `stop {task_id, delivered, returned?, cash_collected?, received_by?}` أو `{closed_reason}` لكل توقف ← `milestone route_back {odometer_km}` (بعد إغلاق كل التوقفات) ← `completed`. لا يُرسل `task_status` على مهمة التوقف. أسباب الرفض الجديدة: `route_not_started`، `stop_already_recorded`، `item_not_planned`، `quantity_exceeds_plan`، `cash_required`، `stops_open`. أسباب التعذّر: shop_closed, refused, no_cash, no_space, vehicle_breakdown, other.

@@ -12,15 +12,21 @@ import * as staffing from '../sectors/staffing/staffing';
 import { haversineKm } from '../sectors/delivery/delivery';
 import * as internal from '../sectors/internal/internal';
 import { vehicleBack, vehicleOut } from '../sectors/internal/internal.controller';
+import * as dist from '../sectors/distribution/distribution';
+import { parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
     const c = code as staffing.Stage;
     return (staffing.STAGES as readonly string[]).includes(code) ? { allowed: staffing.STAGE_ALLOWED[c], needs: staffing.STAGE_NEEDS[c] } : null;
+  }
+  if (dist.isDistribution(pack)) {
+    const c = code as dist.Stage;
+    return (dist.STAGES as readonly string[]).includes(code) ? { allowed: dist.STAGE_ALLOWED[c], needs: dist.STAGE_NEEDS[c] } : null;
   }
   if (internal.isInternal(pack)) {
     const c = code as internal.Stage;
@@ -34,7 +40,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -279,7 +285,7 @@ export class DriverController {
                    AND (t.sector_pack IS DISTINCT FROM 'staffing@1' OR t.status = 'in_progress' OR (lower(t.service_window) < now() + interval '36 hours' AND upper(t.service_window) > now() - interval '6 hours')))
                OR ($2 AND t.status = 'failed' AND t.sector_pack = 'delivery@1'
                    AND NOT EXISTS (SELECT 1 FROM ops.task_milestone m WHERE m.task_id = t.id AND m.code = 'returned_to_sender'))
-            ORDER BY lower(t.service_window) NULLS LAST, t.id LIMIT 200`, [w.id, returns])).rows,
+            ORDER BY lower(t.service_window) NULLS LAST, (t.attributes->>'seq')::int NULLS FIRST, t.id LIMIT 200`, [w.id, returns])).rows,
       };
     });
   }
@@ -298,7 +304,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -315,6 +321,7 @@ export class DriverController {
           // vehicle hand-over and return (internal@1) carry the odometer and the fuel level in eighths
           odometer_km: v.int(o.odometer_km, `ops[${i}].odometer_km`, 0, 10_000_000), fuel: v.int(o.fuel, `ops[${i}].fuel`, 0, 8) };
       }
+      if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       if (type === 'ticket') {
         const poured = concrete.m3(o.poured_m3, `ops[${i}].poured_m3`, { required: true, max: 20, zero: true })!;
         const returned = concrete.m3(o.returned_m3, `ops[${i}].returned_m3`, { max: 20, zero: true }) ?? 0;
@@ -346,11 +353,12 @@ export class DriverController {
         if (op.type === 'milestone') {
           const rule = stageRule(t.sector_pack, op.code);
           if (!rule) { reject('not_supported'); continue; }
+          if (dist.isDistribution(t.sector_pack) && t.attributes?.kind !== 'route') { reject('not_supported', t.status); continue; }
           if (!rule.allowed.includes(t.status)) { reject('invalid_stage', t.status); continue; }
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -382,6 +390,10 @@ export class DriverController {
               throw e;
             }
           }
+          if (dist.isDistribution(t.sector_pack)) {
+            const bad = await routeStage(c, op.task_id, op.code as dist.Stage, op.occurred_at, op.odometer_km);
+            if (bad) { reject(bad, t.status); continue; }
+          }
           if (concrete.isConcrete(t.sector_pack) && op.code === 'loaded') {
             // batching starts the concrete age clock on the ticket
             await c.query('UPDATE ops.load_ticket SET batched_at = $2 WHERE task_id = $1 AND batched_at IS NULL', [op.task_id, op.occurred_at]);
@@ -391,6 +403,21 @@ export class DriverController {
             [randomUUID(), a.tenantId, op.task_id, op.code, op.occurred_at, a.userId, op.client_op_id, op.lat, op.lng, op.note])) {
             results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
+          continue;
+        }
+
+        if (op.type === 'stop') {
+          if (!dist.isDistribution(t.sector_pack) || t.attributes?.kind !== 'stop') { reject('not_supported'); continue; }
+          await c.query('SAVEPOINT op');
+          try {
+            const res = await stopProof(c, a, op.task_id, { ...op.proof, note: op.proof.note ?? op.note }, op.occurred_at, 'driver', op.client_op_id);
+            if ('reject' in res) { await c.query('ROLLBACK TO SAVEPOINT op'); reject(res.reject, res.status); continue; }
+            results.push({ client_op_id: op.client_op_id, result: 'applied', status: res.status });
+          } catch (e) {
+            await c.query('ROLLBACK TO SAVEPOINT op');
+            if ((e as { code?: string }).code === '23505') { results.push({ client_op_id: op.client_op_id, result: 'duplicate' }); continue; }
+            throw e;
+          }
           continue;
         }
 
@@ -463,6 +490,14 @@ export class DriverController {
           && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'check_in'`, [op.task_id])).rowCount) {
           reject('stage_out_of_order', t.status); continue; // the shift starts with the check-in
         }
+        if (dist.isDistribution(t.sector_pack)) {
+          // stops are recorded with the stop op; the route starts after the load check and ends back at the depot
+          if (t.attributes?.kind !== 'route') { reject('not_supported', t.status); continue; }
+          if ((op.to_status === 'in_progress' || op.to_status === 'completed')
+            && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.to_status === 'in_progress' ? 'load_checked' : 'route_back'])).rowCount) {
+            reject('stage_out_of_order', t.status); continue;
+          }
+        }
         if (internal.isInternal(t.sector_pack) && (op.to_status === 'in_progress' || op.to_status === 'completed')
           && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2',
                 [op.task_id, op.to_status === 'in_progress' ? 'vehicle_out' : 'vehicle_back'])).rowCount) {
@@ -490,6 +525,7 @@ export class DriverController {
           if (staffQty) {
             await c.query(`UPDATE ops.task SET attributes = attributes || jsonb_build_object('quantities', $2::jsonb) WHERE id = $1`, [op.task_id, JSON.stringify(staffQty)]);
           }
+          if (dist.isDistribution(t.sector_pack) && op.to_status === 'in_progress') await routeOut(c, a, op.task_id, op.occurred_at);
           if (concrete.isConcrete(t.sector_pack) && (op.to_status === 'completed' || op.to_status === 'failed')) {
             // the mixer is free once it is back at the plant: shorten its booking so it can take the next load
             const back = (await concrete.settingsOf(c, t.legal_entity_id)).lead_minutes;
@@ -521,10 +557,11 @@ export class DriverController {
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null }
+  | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;

@@ -159,7 +159,7 @@ class AppState extends ChangeNotifier {
 
   void _local(String id, DriverTask Function(DriverTask) f) {
     tasks = [for (final t in tasks) t.id == id ? f(t) : t];
-    tasks.removeWhere((t) => (t.status == 'completed') || (t.status == 'failed' && t.stage == 'returned_to_sender'));
+    tasks.removeWhere((t) => (t.status == 'completed') || (t.status == 'failed' && (t.stage == 'returned_to_sender' || t.isStop)));
     notifyListeners();
   }
 
@@ -223,6 +223,46 @@ class AppState extends ChangeNotifier {
     if (r != null && !r.ok) return _refused(taskId, r);
     _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'vehicle_back'));
     await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
+  /// Distribution route: the driver checked the load list (with the odometer) before leaving.
+  Future<String?> loadChecked(String routeId, {int? odometerKm}) async {
+    final r = await _syncOp(routeId, {'type': 'milestone', 'code': 'load_checked', 'odometer_km': ?odometerKm}, wait: true);
+    if (r != null && !r.ok) return _refused(routeId, r);
+    _local(routeId, (x) => x.copyWith(stage: 'load_checked'));
+    return null;
+  }
+
+  /// Leaving the depot opens the route's stops (the server does the same when the op arrives).
+  Future<void> depart(String routeId) async {
+    final ref = task(routeId)?.routeRef;
+    tasks = [for (final t in tasks) t.isStop && t.routeRef == ref && t.status == 'assigned' ? t.copyWith(status: 'accepted') : t];
+    await setStatus(routeId, 'in_progress');
+  }
+
+  /// A stop: delivered and returned quantities, the cash for a cash customer, who received. Online the server answers at once.
+  Future<String?> stopProof(String taskId, {required Map<String, double> delivered, Map<String, double> returned = const {}, String? cash, String? receivedBy}) async {
+    final r = await _syncOp(taskId, {'type': 'stop', 'delivered': delivered, if (returned.isNotEmpty) 'returned': returned, 'cash_collected': ?cash, 'received_by': ?receivedBy}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed'));
+    return null;
+  }
+
+  /// The stop could not be served (shop closed, refused...).
+  Future<String?> stopClosed(String taskId, String reason, {String? note}) async {
+    final r = await _syncOp(taskId, {'type': 'stop', 'closed_reason': reason, 'note': ?note}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'failed'));
+    return null;
+  }
+
+  /// Back at the depot after the last stop: the odometer closes the route's distance and the route ends.
+  Future<String?> routeBack(String routeId, {int? odometerKm}) async {
+    final r = await _syncOp(routeId, {'type': 'milestone', 'code': 'route_back', 'odometer_km': ?odometerKm}, wait: true);
+    if (r != null && !r.ok) return _refused(routeId, r);
+    _local(routeId, (x) => x.copyWith(status: 'completed', stage: 'route_back'));
+    await _syncOp(routeId, {'type': 'task_status', 'to_status': 'completed'});
     return null;
   }
 

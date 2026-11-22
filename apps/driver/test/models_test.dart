@@ -152,4 +152,32 @@ void main() {
       expect([fuelLabel(0), fuelLabel(4), fuelLabel(8)], ['فارغ', '4/8', 'ممتلئ']);
     });
   });
+
+  group('distribution routes', () {
+    DriverTask route(String status, {String? stage}) => DriverTask(id: 'r', status: status, sectorPack: 'distribution@1', version: 1, stage: stage,
+        attributes: {'kind': 'route', 'route_ref': 'DR-1', 'stops': 2, 'load': [{'sku': 'MLK', 'name': 'حليب', 'qty': 30}, {'sku': 'LBN', 'name': 'لبن', 'qty': 2.5}]});
+    DriverTask stop(String status, {bool cash = false}) => DriverTask(id: 's', status: status, sectorPack: 'distribution@1', version: 1,
+        attributes: {'kind': 'stop', 'route_ref': 'DR-1', 'seq': 2, 'name': 'بقالة', 'payment': cash ? 'cash' : 'credit', 'address': 'الرميثية',
+          'items': [{'sku': 'MLK', 'name': 'حليب', 'qty': 10, 'price': '0.350'}, {'sku': 'LBN', 'name': 'لبن', 'qty': 4, 'price': '0.250'}]});
+    test('route: accept, check the load, leave, come back', () {
+      expect(nextActions(route('assigned')), [TaskAction.accept]);
+      expect(nextActions(route('accepted')), [TaskAction.loadChecked]);
+      expect(nextActions(route('accepted', stage: 'load_checked')), [TaskAction.depart]);
+      expect(nextActions(route('in_progress', stage: 'load_checked')), [TaskAction.routeBack]);
+      expect(nextActions(route('in_progress', stage: 'route_back')), [TaskAction.complete]);
+      expect(actionLabel(route('accepted'), TaskAction.loadChecked), 'راجعت الحمولة');
+      final r = route('assigned');
+      expect((r.isRoute, r.isStop, r.stopsCount), (true, false, 2));
+      expect(r.loadList.map((i) => qtyText(i.qty)).toList(), ['30', '2.5']);
+    });
+    test('stop: opens after departure, value of what was delivered', () {
+      expect(nextActions(stop('assigned')), isEmpty);
+      expect(nextActions(stop('accepted')), [TaskAction.stopDeliver, TaskAction.fail]);
+      final s = stop('accepted', cash: true);
+      expect((s.isStop, s.payCash, s.seq, s.address), (true, true, 2, 'الرميثية'));
+      expect(distValueFils(s.distItems, {'MLK': 10, 'LBN': 2}), 3500 + 500);
+      expect(failReasonsFor(s), distFailReasons);
+      expect(rejectReasons['stops_open'], isNotNull);
+    });
+  });
 }

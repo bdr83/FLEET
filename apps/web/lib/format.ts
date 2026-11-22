@@ -47,7 +47,7 @@ export const TASK_STATUS: Record<string, { label: string; tone: string }> = {
 export const ROLE: Record<string, string> = {
   owner: 'مالك', admin: 'مدير', dispatcher: 'موزّع', accountant: 'محاسب', branch_supervisor: 'مشرف فرع', driver: 'سائق', customer: 'عميل', employee: 'موظف',
 };
-export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي' };
+export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي', 'distribution@1': 'توزيع ذاتي' };
 export const packLabel = (p: string) => PACKS[p] ?? p;
 
 /** One readable line from a task's free-form attributes (address, recipient, product). */
@@ -189,3 +189,15 @@ export const VEHICLE_STATE: Record<string, { label: string; tone: string }> = {
 /** Fuel gauge in eighths (0–8). */
 export const fuelLine = (n: number | null | undefined) => (n === null || n === undefined ? '—' : n === 8 ? 'ممتلئ' : n === 0 ? 'فارغ' : `${n}/8`);
 export const km = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US')} كم`);
+
+/** Own-fleet distribution pack (distribution@1) labels. */
+export const DIST_STAGE: Record<string, string> = { load_checked: 'راجع الحمولة', route_back: 'عاد للمستودع' };
+Object.assign(STAGE, DIST_STAGE);
+export const DIST_FAIL: Record<string, string> = { shop_closed: 'المحل مغلق', refused: 'رفض الاستلام', no_cash: 'لا يوجد نقد', no_space: 'لا مكان للتخزين', vehicle_breakdown: 'عطل المركبة', other: 'سبب آخر' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(DIST_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+export const ROUTE_STATUS: Record<string, { label: string; tone: string }> = {
+  planned: tone('مخطط', 'info'), loaded: tone('محمّل', 'primary'), out: tone('في الطريق', 'warning'), back: tone('عاد: بانتظار التسوية', 'warning'),
+  settled: tone('مُسوّى', 'success'), canceled: tone('ملغى'),
+};
+export const PRODUCT_UNIT: Record<string, string> = { piece: 'حبة', carton: 'كرتون', crate: 'صندوق', kg: 'كغ', liter: 'لتر', bag: 'كيس' };
+export const qtyText = (n: number | null | undefined) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 3 }));

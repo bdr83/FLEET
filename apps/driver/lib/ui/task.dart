@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/models.dart';
 import 'deliver.dart';
+import 'stop.dart';
 import 'ticket.dart';
 import 'theme.dart';
 
@@ -51,6 +52,29 @@ class TaskScreen extends StatelessWidget {
             if (['assigned', 'accepted'].contains(t.status) && !checkInOpen(t, DateTime.now()))
               Padding(padding: const EdgeInsets.only(top: 8), child: Text('يفتح تسجيل الحضور ${kwTime(t.windowFrom!.subtract(earlyCheckIn), date: true)}',
                   key: const Key('checkin-opens'), style: const TextStyle(fontWeight: FontWeight.bold))),
+          ]))),
+          const SizedBox(height: 12),
+        ],
+        if (t.isRoute) ...[
+          Card(key: const Key('route-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('مسار التوزيع · ${t.stopsCount} توقفات', style: text.labelMedium),
+            const SizedBox(height: 4),
+            Text('قائمة التحميل', style: text.titleMedium),
+            for (final i in t.loadList) Row(children: [Expanded(child: Text(i.name)), Ltr(qtyText(i.qty), style: const TextStyle(fontWeight: FontWeight.bold))]),
+            const SizedBox(height: 6),
+            Text(t.status == 'accepted' && t.stage == null
+                ? 'راجع الحمولة على الشاحنة مع القائمة وسجّل العدّاد قبل الانطلاق.'
+                : t.status == 'in_progress' ? 'سلّم التوقفات بالترتيب، ثم سجّل العودة للمستودع بالعدّاد.' : 'انطلق عندما تكون جاهزًا.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
+        if (t.isStop) ...[
+          Card(key: const Key('stop-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('التوقف ${t.seq ?? ''} من المسار ${t.routeRef ?? ''}', style: text.labelMedium),
+            Text(t.payCash ? 'الدفع نقدًا عند التسليم' : 'على الحساب (بلا تحصيل)', style: TextStyle(fontWeight: FontWeight.bold, color: t.payCash ? Theme.of(context).colorScheme.tertiary : null)),
+            const SizedBox(height: 4),
+            for (final i in t.distItems) Row(children: [Expanded(child: Text(i.name)), Ltr(qtyText(i.qty))]),
+            if (t.status == 'assigned') const Padding(padding: EdgeInsets.only(top: 8), child: Text('يُفتح التسليم بعد الانطلاق من المستودع', style: TextStyle(fontWeight: FontWeight.bold))),
           ]))),
           const SizedBox(height: 12),
         ],
@@ -204,10 +228,27 @@ class _ActionsState extends State<_Actions> {
           toast(context, s.offline ? 'سُجّل الانصراف وسيُرسل عند عودة الاتصال' : 'سُجّل الانصراف. يومك بانتظار اعتماد العميل');
           Navigator.of(context).pop();
         }
+      case TaskAction.loadChecked:
+        final reading = await _odometer(context, 'مراجعة الحمولة', 'تأكيد', fuel: false);
+        if (reading == null) return;
+        final err = await s.loadChecked(task.id, odometerKm: reading.km);
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.depart: await s.depart(task.id);
+      case TaskAction.routeBack:
+        final reading = await _odometer(context, 'العودة للمستودع', 'تأكيد العودة', fuel: false);
+        if (reading == null) return;
+        final err = await s.routeBack(task.id, odometerKm: reading.km);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, 'انتهى المسار. سلّم النقد والمرتجعات للمكتب');
+        Navigator.of(context).pop();
+      case TaskAction.stopDeliver:
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => StopScreen(taskId: task.id)));
+        if (context.mounted && s.task(task.id) == null) Navigator.of(context).pop();
       case TaskAction.vehicleOut:
       case TaskAction.vehicleBack:
         final out = action == TaskAction.vehicleOut;
-        final reading = await _odometer(context, out);
+        final reading = await _odometer(context, out ? 'استلام المركبة' : 'إرجاع المركبة', out ? 'تأكيد الاستلام' : 'تأكيد الإرجاع');
         if (reading == null) return;
         final err = out
             ? await s.vehicleOut(task.id, odometerKm: reading.km, fuel: reading.fuel)
@@ -227,29 +268,32 @@ class _ActionsState extends State<_Actions> {
   }
 
   /// Odometer (required) and fuel in eighths, for taking or bringing back the vehicle.
-  Future<({int km, int? fuel})?> _odometer(BuildContext context, bool out) async {
+  Future<({int km, int? fuel})?> _odometer(BuildContext context, String title, String confirm, {bool fuel = true}) async {
+    final withFuel = fuel;
     final odo = TextEditingController();
-    int? fuel;
+    int? level;
     return showModalBottomSheet<({int km, int? fuel})>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
         padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(out ? 'استلام المركبة' : 'إرجاع المركبة', style: Theme.of(ctx).textTheme.titleLarge),
+          Text(title, style: Theme.of(ctx).textTheme.titleLarge),
           const SizedBox(height: 8),
           TextField(key: const Key('odometer'), controller: odo, autofocus: true, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
               decoration: const InputDecoration(labelText: 'قراءة العدّاد (كم)'), onChanged: (_) => set(() {})),
-          const SizedBox(height: 12),
-          Text('الوقود', style: Theme.of(ctx).textTheme.labelMedium),
-          Wrap(spacing: 6, children: [
-            for (final n in [0, 2, 4, 6, 8]) ChoiceChip(key: Key('fuel-$n'), label: Text(fuelLabel(n)), selected: fuel == n, onSelected: (v) => set(() => fuel = v ? n : null)),
-          ]),
+          if (withFuel) ...[
+            const SizedBox(height: 12),
+            Text('الوقود', style: Theme.of(ctx).textTheme.labelMedium),
+            Wrap(spacing: 6, children: [
+              for (final n in [0, 2, 4, 6, 8]) ChoiceChip(key: Key('fuel-$n'), label: Text(fuelLabel(n)), selected: level == n, onSelected: (v) => set(() => level = v ? n : null)),
+            ]),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             key: const Key('odometer-save'),
-            onPressed: int.tryParse(odo.text.trim()) == null ? null : () => Navigator.pop(ctx, (km: int.parse(odo.text.trim()), fuel: fuel)),
-            child: Text(out ? 'تأكيد الاستلام' : 'تأكيد الإرجاع'),
+            onPressed: int.tryParse(odo.text.trim()) == null ? null : () => Navigator.pop(ctx, (km: int.parse(odo.text.trim()), fuel: level)),
+            child: Text(confirm),
           ),
         ]),
       )),
@@ -284,6 +328,13 @@ class _ActionsState extends State<_Actions> {
       )),
     );
     if (go != true) return;
+    if (task.isStop) {
+      final err = await s.stopClosed(task.id, reason ?? 'other', note: note.text.trim().isEmpty ? null : note.text.trim());
+      if (!context.mounted) return;
+      if (err != null) return toast(context, err, error: true);
+      toast(context, 'سُجّل تعذّر التوقف');
+      return Navigator.of(context).pop();
+    }
     await s.setStatus(task.id, 'failed', reasonCode: reason, note: note.text.trim().isEmpty ? null : note.text.trim());
     if (context.mounted) toast(context, task.isDelivery ? 'سُجّل التعذّر. أعد الشحنة للمرسل ثم سجّل الإرجاع' : 'سُجّل التعذّر');
   }
