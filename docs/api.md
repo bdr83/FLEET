@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -365,3 +365,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `POST /v1/courier/scans` | مسح دفعة `{hub_id, event: received\|sorted\|dispatched\|arrived\|returned\|rto_out, awbs[≤500], rto?, note?}`؛ نتيجة لكل بوليصة (`unknown_awb`، `closed`، `with_driver`، `awaiting_return`، `not_failed`، `not_rto`). «returned» بعد محاولة فاشلة يعيد المهمة لقائمة الإسناد ويزيد رقم المحاولة ما بقيت محاولات، وإلا (أو مع `rto: true`) يقرر الإرجاع للمرسل؛ «rto_out» يسجل تسليمها للمرسل |
 | `GET /v1/courier/exceptions` | تجاوزت موعدها، راكدة في محطة بلا مسح منذ 24 ساعة [تخمين]، فشلت ولم تعد للمحطة، تنتظر الإرجاع للمرسل |
 | `GET /v1/courier/report?from&to` | للشحنات المحجوزة في الفترة، حسب الخدمة والمرسل: نسبة التسليم، من أول محاولة، في الموعد، نسبة الإرجاع، COD المحصّل |
+
+## قطاع المستودعات warehouse (القطاع 8)
+
+مستودع للشركة أو تخزين لعملاء (3PL). الرصيد لا يُخزَّن: هو مجموع حركات `ops.wh_movement` (سجل لا يُعدَّل: استلام، التقاط، نقل، جرد). الصنف ملك عميل (`customer_id`) أو بضاعة الشركة، وكل مستند (استلام أو أمر صرف) لأصناف مالك واحد.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/warehouse/warehouses` | المستودعات مع مواقعها (الإضافة تحتاج org:write) |
+| `POST /v1/warehouse/warehouses/:id/locations` | `{codes[≤500], kind: storage\|pick\|dock\|quarantine}`؛ الرموز الموجودة تُتخطى |
+| `GET/POST /v1/warehouse/items`، `PATCH /v1/warehouse/items/:id` | الأصناف: `sku` فريد لكل مالك، الوحدة، حد إعادة الطلب `min_qty`، و`track_expiry` (الصلاحية إلزامية عند الاستلام)، والمتوفر |
+| `POST /v1/warehouse/receipts`، `GET` | إذن استلام `{warehouse_id, customer_id?, ref, lines[{item_id, qty, location_id, lot?, expiry?}], expected?[{item_id, qty}]}`؛ يعيد الفروق عن الإشعار |
+| `GET /v1/warehouse/stock?warehouse_id&customer_id&item_id` | الرصيد لكل صنف وموقع ودفعة وصلاحية |
+| `POST /v1/warehouse/moves` | نقل بين موقعين في المستودع نفسه (أقدم صلاحية أولًا من المصدر) |
+| `POST /v1/warehouse/counts` | جرد موقع `{item_id, location_id, counted_qty, reason, lot?}`؛ الفرق يُسجل حركة بسببه |
+| `POST/GET /v1/warehouse/orders`، `GET /orders/:id` | أمر صرف `{warehouse_id, customer_id?, ref, lines, ship_to?, due_at?}`؛ التفاصيل تعرض خطة الالتقاط المقترحة وما ينقص |
+| `POST /orders/:id/pick` | التقاط بأقدم صلاحية أولًا (بلا صلاحية آخرًا، ثم الموقع الأصغر رصيدًا)، يتخطى الحجر والمنتهي، كله أو لا شيء (409 مع `short`) |
+| `POST /orders/:id/ship` | `{delivery?: true}` ينشئ مهمة توصيل `delivery@1` لأسطولنا (يحتاج نشاط التوصيل أو البريد السريع، وجوال ومنطقة في `ship_to`) |
+| `POST /orders/:id/cancel` | `{reason}`؛ الأمر المجموع تعود بضاعته لمواقعها |
+| `GET /v1/warehouse/exceptions` | تحت حد الطلب، صلاحية منتهية أو خلال 30 يومًا [تخمين]، أوامر متأخرة (الموعد أو 24 ساعة [تخمين])، استلامات بفروق (7 أيام) |
+| `GET /v1/warehouse/report?from&to` | لكل مالك: استلامات ووحدات مستلمة ومصروفة وفروق الجرد وأوامر مشحونة والالتزام بالموعد ومتوسط ساعات الشحن والمخزون والمواقع المشغولة الآن |

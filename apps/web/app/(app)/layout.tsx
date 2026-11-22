@@ -18,6 +18,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/distribution', label: 'التوزيع اليومي', perm: 'tasks:read', pack: 'distribution|coldchain' },
   { href: '/coldchain', label: 'سلسلة التبريد', perm: 'tasks:read', pack: 'coldchain' },
   { href: '/courier', label: 'البريد السريع', perm: 'tasks:read', pack: 'courier' },
+  { href: '/warehouse', label: 'المستودعات', perm: 'tasks:read', pack: 'warehouse' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },
