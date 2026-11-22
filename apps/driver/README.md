@@ -41,8 +41,8 @@ node e2e/driver_distribution.mjs              # 5 خطوات: المسار وق�
 
 workflow ‏**ios** (يدوي) يبني التطبيق على macOS ويرفعه إلى TestFlight بتوقيع تلقائي من Xcode، بلا شهادات يدوية. يحتاج مرة واحدة:
 1. حساب Apple Developer Program.
-2. في App Store Connect: تطبيق جديد بمعرّف الحزمة `com.q8hub.driver`.
-3. مفتاح API من App Store Connect → Users and Access → Integrations بدور Admin، وفي أسرار GitHub: `APPSTORE_KEY_ID` و`APPSTORE_ISSUER_ID` و`APPSTORE_KEY_P8` (محتوى ملف ‎.p8) و`APPLE_TEAM_ID`.
+2. في App Store Connect: تطبيق جديد بمعرّف الحزمة `com.q8hub.driver` (أُنشئ باسم Q8Hub Driver).
+3. مفتاح API من App Store Connect → Users and Access → Integrations بدور Admin، وفي أسرار GitHub السر `APPSTORE_KEY_P8` (محتوى ملف ‎.p8). Key ID وIssuer ID يُكتبان عند تشغيل الـ workflow، وTeam ID مضبوط فيه.
 4. Actions → ios → Run workflow. بعد معالجة Apple يظهر البناء في TestFlight، ويُضاف المختبرون من هناك (داخليون فورًا، وخارجيون بعد مراجعة Apple للنسخة التجريبية).
 
 خيار `upload` = false يبني فقط بلا توقيع للتأكد من سلامة البناء.
