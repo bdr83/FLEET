@@ -3,7 +3,8 @@ import { DbService } from './db/db.service';
 import { HealthController } from './health/health.controller';
 import { TasksController } from './tasks/tasks.controller';
 import { AuthController } from './auth/auth.controller';
-import { OtpService, LogSmsSender, SMS_SENDER } from './auth/otp.service';
+import { OtpService, SMS_SENDER } from './auth/otp.service';
+import { smsSenderFromEnv } from './auth/sms';
 import { SessionService } from './auth/session.service';
 import { AuthGuard } from './auth/auth.guard';
 import { TenantsController } from './tenants/tenants.controller';
@@ -42,7 +43,7 @@ import { MaintenanceService } from './maintenance/maintenance.service';
     SessionService,
     AuthGuard,
     MaintenanceService,
-    { provide: SMS_SENDER, useClass: LogSmsSender },
+    { provide: SMS_SENDER, useFactory: () => smsSenderFromEnv() },
   ],
 })
 export class AppModule implements NestModule {

@@ -1,15 +1,11 @@
-import { HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import { DbService } from '../db/db.service';
 
 export const SMS_SENDER = 'SMS_SENDER';
 export interface SmsSender { send(phone: string, text: string): Promise<void> }
+export { LogSmsSender } from './sms';
 
-/** Dev/test sender. The real provider is decision C5 (Phase C) and plugs in here. */
-export class LogSmsSender implements SmsSender {
-  private readonly log = new Logger('sms');
-  async send(phone: string, _text: string) { this.log.log(`OTP sent to ${phone.slice(0, 6)}****`); }
-}
 
 const TTL_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 5;
@@ -42,7 +38,12 @@ export class OtpService {
         `INSERT INTO auth.otp_challenge (id, phone, code_hash, expires_at) VALUES ($1,$2,$3, now() + $4 * interval '1 millisecond')`,
         [randomUUID(), phone, this.hash(code), TTL_MS]);
     });
-    await this.sms.send(phone, `رمز الدخول: ${code}`);
+    try {
+      await this.sms.send(phone, `رمز الدخول: ${code}`);
+    } catch (e) {
+      new Logger('otp').error(`sms send failed: ${(e as Error).message}`);
+      throw new ServiceUnavailableException('sms_unavailable');
+    }
     const echo = process.env.OTP_DEV_ECHO === '1' && process.env.NODE_ENV !== 'production';
     return echo ? { devCode: code } : {};
   }
