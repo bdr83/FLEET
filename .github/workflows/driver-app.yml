@@ -21,7 +21,7 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       # API_URL comes from a repository variable; unsigned debug-key build for internal testing only
-      - run: flutter build apk --release --dart-define=API_URL=${{ vars.DRIVER_API_URL || 'https://api.example.invalid' }}
+      - run: flutter build apk --release --dart-define=API_URL=${{ vars.DRIVER_API_URL || 'https://api.q8hub.com' }}
       - uses: actions/upload-artifact@v4
         with:
           name: driver-apk
