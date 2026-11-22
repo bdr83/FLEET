@@ -41,6 +41,22 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isFreight) ...[
+          Card(key: const Key('freight-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('بوليصة النقل', style: text.labelMedium),
+            if (t.waybillNo != null) Ltr(t.waybillNo!, style: text.headlineSmall),
+            Text('${t.cargo['description'] ?? ''}${t.cargo['packages'] != null ? ' · ${t.cargo['packages']} طرد' : ''}', style: text.titleMedium),
+            if (t.cargo['weight_kg'] != null) Row(children: [const Text('الوزن المعلن: '), Ltr('${t.cargo['weight_kg']} kg')]),
+            if (t.trailerPlate != null) Row(children: [const Text('المقطورة: '), Ltr(t.trailerPlate!)]),
+            if (t.freight?['seal_no'] != null) Row(children: [const Text('رقم الختم: '), Ltr('${t.freight!['seal_no']}')]),
+            const SizedBox(height: 6),
+            Text('التحميل من', style: text.labelMedium),
+            Text(t.pickupLine.isEmpty ? '—' : t.pickupLine),
+            const SizedBox(height: 4),
+            const Text('سجّل الوصول والتحميل بالوزن والختم، ثم الوصول للتفريغ واسم المستلم. الانتظار بعد الوقت المجاني يُحتسب على العميل.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isStaffing) ...[
           Card(key: const Key('shift-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('مناوبة لدى العميل', style: text.labelMedium),
@@ -90,7 +106,7 @@ class TaskScreen extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : 'العنوان', style: text.labelMedium),
+          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight ? 'التفريغ في' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
           if (t.notes != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(t.notes!)),
           if (t.windowFrom != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('الموعد: ${kwTime(t.windowFrom, date: true)} إلى ${kwTime(t.windowTo)}')),
@@ -217,7 +233,18 @@ class _ActionsState extends State<_Actions> {
       case TaskAction.pickedUp:
         await s.milestone(task.id, 'picked_up');
       case TaskAction.atDropoff: await s.milestone(task.id, 'at_dropoff');
-      case TaskAction.loaded: await s.milestone(task.id, 'loaded');
+      case TaskAction.loaded:
+        if (!task.isFreight) {
+          await s.milestone(task.id, 'loaded');
+          return;
+        }
+        final r = await _cargoForm(context, 'التحميل', 'تأكيد التحميل', receiver: false);
+        if (r == null) return;
+        await s.milestone(task.id, 'loaded', extra: {'weight_kg': ?r.weightKg, 'seal_no': ?r.seal});
+      case TaskAction.unloaded:
+        final r = await _cargoForm(context, 'التفريغ والتسليم', 'تأكيد التسليم', receiver: true);
+        if (r == null) return;
+        await s.milestone(task.id, 'unloaded', extra: {'received_by': r.receiver, 'weight_kg': ?r.weightKg});
       case TaskAction.atSite: await s.milestone(task.id, 'at_site');
       case TaskAction.pourStart: await s.milestone(task.id, 'pour_start');
       case TaskAction.pourEnd: await s.milestone(task.id, 'pour_end');
@@ -265,6 +292,36 @@ class _ActionsState extends State<_Actions> {
       default:
     }
     if (action == TaskAction.complete && context.mounted) Navigator.of(context).pop();
+  }
+
+  /// Freight: weight and seal at loading, or the receiver's name (required) and weight at unloading.
+  Future<({double? weightKg, String? seal, String? receiver})?> _cargoForm(BuildContext context, String title, String confirm, {required bool receiver}) {
+    final weight = TextEditingController(), other = TextEditingController();
+    return showModalBottomSheet<({double? weightKg, String? seal, String? receiver})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          if (receiver) TextField(key: const Key('received-by'), controller: other, autofocus: true, decoration: const InputDecoration(labelText: 'اسم المستلم'), onChanged: (_) => set(() {})),
+          TextField(key: const Key('weight-kg'), controller: weight, keyboardType: const TextInputType.numberWithOptions(decimal: true), textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'الوزن (كغ) إن وُزنت'), onChanged: (_) => set(() {})),
+          if (!receiver) TextField(key: const Key('seal-no'), controller: other, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'رقم الختم (إن وُجد)')),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('cargo-save'),
+            onPressed: (receiver && other.text.trim().isEmpty) || (weight.text.trim().isNotEmpty && double.tryParse(weight.text.trim()) == null) ? null : () => Navigator.pop(ctx, (
+              weightKg: double.tryParse(weight.text.trim()),
+              seal: !receiver && other.text.trim().isNotEmpty ? other.text.trim() : null,
+              receiver: receiver ? other.text.trim() : null,
+            )),
+            child: Text(confirm),
+          ),
+        ]),
+      )),
+    );
   }
 
   /// Odometer (required) and fuel in eighths, for taking or bringing back the vehicle.

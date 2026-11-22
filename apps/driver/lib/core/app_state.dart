@@ -185,12 +185,12 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'task_status', 'to_status': status, 'reason_code': ?reasonCode, 'note': ?note});
   }
 
-  Future<void> milestone(String taskId, String code) async {
+  Future<void> milestone(String taskId, String code, {Map<String, dynamic> extra = const {}}) async {
     final p = await tracker.current();
     // batching starts the concrete age clock: show it at once, the server keeps its own time from this op
     _local(taskId, (t) => t.copyWith(stage: code,
         ticket: t.isConcrete && code == 'loaded' && t.batchedAt == null ? {...t.ticket!, 'batched_at': nowIso()} : null));
-    await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
+    await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude, ...extra});
   }
 
   /// Driver supply: checking in accepts the day-shift if needed, records the check-in with the position (the office sees

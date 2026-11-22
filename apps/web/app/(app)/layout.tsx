@@ -11,6 +11,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/', label: 'لوحة التوزيع', perm: 'tasks:read' },
   { href: '/tasks', label: 'المهام', perm: 'tasks:read' },
   { href: '/delivery', label: 'مركز التوصيل', perm: 'tasks:read', pack: 'delivery' },
+  { href: '/freight', label: 'الشحن والنقل', perm: 'tasks:read', pack: 'freight' },
   { href: '/concrete', label: 'جدول الصب', perm: 'tasks:read', pack: 'concrete' },
   { href: '/staffing', label: 'لوحة الإسناد', perm: 'tasks:read', pack: 'staffing' },
   { href: '/internal', label: 'أسطول الشركة', perm: 'tasks:read', pack: 'internal' },

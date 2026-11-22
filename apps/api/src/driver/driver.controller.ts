@@ -13,11 +13,12 @@ import { haversineKm } from '../sectors/delivery/delivery';
 import * as internal from '../sectors/internal/internal';
 import { vehicleBack, vehicleOut } from '../sectors/internal/internal.controller';
 import * as dist from '../sectors/distribution/distribution';
+import * as freight from '../sectors/freight/freight';
 import { parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -32,6 +33,10 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
     const c = code as internal.Stage;
     return (internal.STAGES as readonly string[]).includes(code) ? { allowed: internal.STAGE_ALLOWED[c], needs: internal.STAGE_NEEDS[c] } : null;
   }
+  if (freight.isFreight(pack)) {
+    const c = code as freight.Stage;
+    return (freight.STAGES as readonly string[]).includes(code) ? { allowed: freight.STAGE_ALLOWED[c], needs: freight.STAGE_NEEDS[c] } : null;
+  }
   if (concrete.isConcrete(pack)) {
     const c = code as concrete.Stage;
     return (concrete.STAGES as readonly string[]).includes(code) ? { allowed: concrete.STAGE_ALLOWED[c], needs: concrete.STAGE_NEEDS[c] } : null;
@@ -40,7 +45,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -275,10 +280,14 @@ export class DriverController {
                   t.attributes, t.version, asg.asset_id,
                   (SELECT m.code FROM ops.task_milestone m WHERE m.task_id = t.id ORDER BY m.occurred_at DESC LIMIT 1) AS stage,
                   (EXISTS (SELECT 1 FROM ops.delivery_pod p WHERE p.task_id = t.id)
-                   OR EXISTS (SELECT 1 FROM ops.load_ticket l WHERE l.task_id = t.id AND l.signed_at IS NOT NULL)) AS has_proof,
+                   OR EXISTS (SELECT 1 FROM ops.load_ticket l WHERE l.task_id = t.id AND l.signed_at IS NOT NULL)
+                   OR EXISTS (SELECT 1 FROM ops.freight_shipment s WHERE s.task_id = t.id AND s.delivered_at IS NOT NULL)) AS has_proof,
                   (SELECT jsonb_build_object('ticket_no', l.ticket_no, 'volume_m3', l.volume_m3, 'batched_at', l.batched_at, 'signed', l.signed_at IS NOT NULL,
                           'planned_arrival', l.planned_arrival, 'site_ready', p.site_ready, 'mix_code', p.mix_code)
-                     FROM ops.load_ticket l JOIN ops.pour_order p ON p.id = l.pour_order_id WHERE l.task_id = t.id) AS ticket
+                     FROM ops.load_ticket l JOIN ops.pour_order p ON p.id = l.pour_order_id WHERE l.task_id = t.id) AS ticket,
+                  (SELECT jsonb_build_object('waybill_no', s.waybill_no, 'mode', s.mode, 'cargo', s.cargo, 'pickup', s.pickup, 'dropoff', s.dropoff,
+                          'trailer_plate', tr.plate_no, 'loaded_weight_kg', s.loaded_weight_kg, 'seal_no', s.seal_no, 'received_by', s.received_by)
+                     FROM ops.freight_shipment s LEFT JOIN fleet.asset tr ON tr.id = s.trailer_asset_id WHERE s.task_id = t.id) AS freight
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE (t.status IN ('assigned','accepted','in_progress')
                    -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
@@ -319,7 +328,10 @@ export class DriverController {
         return { ...base, type: 'milestone' as const, code: v.oneOf(o.code, `ops[${i}].code`, ALL_STAGES, { required: true })!,
           lat: num(o.lat, `ops[${i}].lat`, -90, 90), lng: num(o.lng, `ops[${i}].lng`, -180, 180),
           // vehicle hand-over and return (internal@1) carry the odometer and the fuel level in eighths
-          odometer_km: v.int(o.odometer_km, `ops[${i}].odometer_km`, 0, 10_000_000), fuel: v.int(o.fuel, `ops[${i}].fuel`, 0, 8) };
+          odometer_km: v.int(o.odometer_km, `ops[${i}].odometer_km`, 0, 10_000_000), fuel: v.int(o.fuel, `ops[${i}].fuel`, 0, 8),
+          // loading and unloading (freight@1) carry the weight, the seal and the receiver's name
+          weight_kg: freight.kg(o.weight_kg, `ops[${i}].weight_kg`, { zero: true }), seal_no: v.str(o.seal_no, `ops[${i}].seal_no`, { max: 40 }),
+          received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }) };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       if (type === 'ticket') {
@@ -358,7 +370,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -393,6 +405,17 @@ export class DriverController {
           if (dist.isDistribution(t.sector_pack)) {
             const bad = await routeStage(c, op.task_id, op.code as dist.Stage, op.occurred_at, op.odometer_km);
             if (bad) { reject(bad, t.status); continue; }
+          }
+          if (freight.isFreight(t.sector_pack)) {
+            if (op.code === 'unloaded' && !op.received_by) { reject('receiver_required', t.status); continue; }
+            if (op.code === 'loaded') {
+              await c.query('UPDATE ops.freight_shipment SET loaded_weight_kg = COALESCE($2, loaded_weight_kg), seal_no = COALESCE($3, seal_no) WHERE task_id = $1',
+                [op.task_id, op.weight_kg, op.seal_no]);
+            }
+            if (op.code === 'unloaded') {
+              await c.query('UPDATE ops.freight_shipment SET delivered_weight_kg = $2, received_by = $3, pod_file_key = $4, delivered_at = $5 WHERE task_id = $1',
+                [op.task_id, op.weight_kg, op.received_by, op.file_key, op.occurred_at]);
+            }
           }
           if (concrete.isConcrete(t.sector_pack) && op.code === 'loaded') {
             // batching starts the concrete age clock on the ticket
@@ -503,7 +526,24 @@ export class DriverController {
                 [op.task_id, op.to_status === 'in_progress' ? 'vehicle_out' : 'vehicle_back'])).rowCount) {
           reject(op.to_status === 'in_progress' ? 'stage_out_of_order' : 'proof_required', t.status); continue; // the trip starts and ends with the odometer
         }
+        if (freight.isFreight(t.sector_pack) && (op.to_status === 'in_progress' || op.to_status === 'completed')
+          && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.to_status === 'in_progress' ? 'loaded' : 'unloaded'])).rowCount) {
+          reject(op.to_status === 'in_progress' ? 'stage_out_of_order' : 'proof_required', t.status); continue; // the trip starts loaded and ends unloaded
+        }
         let staffQty: Record<string, number> | null = null;
+        if (op.to_status === 'completed' && freight.isFreight(t.sector_pack)) {
+          const ms = (await c.query(
+            `SELECT min(occurred_at) FILTER (WHERE code = 'at_pickup') AS at_pickup, min(occurred_at) FILTER (WHERE code = 'loaded') AS loaded,
+                    min(occurred_at) FILTER (WHERE code = 'at_dropoff') AS at_dropoff, min(occurred_at) FILTER (WHERE code = 'unloaded') AS unloaded
+               FROM ops.task_milestone WHERE task_id = $1`, [op.task_id])).rows[0];
+          const sh = (await c.query('SELECT bill_unit, planned_km, cargo, loaded_weight_kg::float, delivered_weight_kg::float FROM ops.freight_shipment WHERE task_id = $1', [op.task_id])).rows[0];
+          if (!sh) { reject('not_supported', t.status); continue; }
+          // what the invoice prices: trip, km or tons, plus detention hours after the free time at each end
+          const det = freight.tripDetention(ms, (await freight.settingsOf(c, t.legal_entity_id)).free_detention_minutes);
+          await c.query('UPDATE ops.freight_shipment SET detention_minutes = $2 WHERE task_id = $1', [op.task_id, det.minutes]);
+          staffQty = freight.quantities({ bill_unit: sh.bill_unit, planned_km: sh.planned_km, cargo_weight_kg: sh.cargo?.weight_kg ?? null,
+            loaded_weight_kg: sh.loaded_weight_kg, delivered_weight_kg: sh.delivered_weight_kg }, det.hours);
+        }
         if (op.to_status === 'completed' && staffing.isStaffing(t.sector_pack)) {
           const ms = (await c.query(
             `SELECT min(occurred_at) FILTER (WHERE code = 'check_in') AS cin, min(occurred_at) FILTER (WHERE code = 'check_out') AS cout
@@ -556,7 +596,8 @@ export class DriverController {
 
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
-  | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null }
+  | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
+      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };

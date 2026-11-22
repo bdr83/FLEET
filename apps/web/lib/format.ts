@@ -50,6 +50,7 @@ export const ROLE: Record<string, string> = {
 /** Sector packs a company can turn on, in the order of the sector list. */
 export const PACK_INFO: { code: string; sector: number; label: string; hint: string }[] = [
   { code: 'delivery', sector: 1, label: 'توصيل الطلبات والمندوبين', hint: 'طلبات توصيل، تتبع للمستلم، COD، عمولات' },
+  { code: 'freight', sector: 2, label: 'الشحن والنقل البري', hint: 'أوامر نقل، شاحنات ومقطورات، ناقلون من الباطن، ربح الرحلة' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
@@ -57,7 +58,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
 export const enabledPacks = (packs?: string[]) => Object.entries(PACKS).filter(([k]) => !packs || packs.includes(k.split('@')[0]));
-export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي', 'distribution@1': 'توزيع ذاتي' };
+export const PACKS: Record<string, string> = { 'delivery@1': 'توصيل', 'freight@1': 'نقل بري', 'concrete@1': 'خرسانة جاهزة', 'staffing@1': 'توريد سائقين', 'internal@1': 'أسطول داخلي', 'distribution@1': 'توزيع ذاتي' };
 export const packLabel = (p: string) => PACKS[p] ?? p;
 
 /** One readable line from a task's free-form attributes (address, recipient, product). */
@@ -211,3 +212,15 @@ export const ROUTE_STATUS: Record<string, { label: string; tone: string }> = {
 };
 export const PRODUCT_UNIT: Record<string, string> = { piece: 'حبة', carton: 'كرتون', crate: 'صندوق', kg: 'كغ', liter: 'لتر', bag: 'كيس' };
 export const qtyText = (n: number | null | undefined) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 3 }));
+
+/** Freight pack (freight@1) labels. at_pickup / at_dropoff share the delivery labels. */
+export const FREIGHT_STAGE: Record<string, string> = { at_pickup: 'وصل لنقطة التحميل', loaded: 'تم التحميل', at_dropoff: 'وصل لنقطة التفريغ', unloaded: 'تم التفريغ' };
+export const FREIGHT_FAIL: Record<string, string> = {
+  truck_breakdown: 'عطل الشاحنة', refused_by_consignee: 'رفض المستلم', weight_mismatch: 'اختلاف الوزن', cargo_damaged: 'حمولة تالفة',
+  address_not_found: 'لم يُعثر على العنوان', cargo_not_ready: 'الحمولة غير جاهزة', customer_canceled: 'ألغاه العميل', other: 'سبب آخر',
+};
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(FREIGHT_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+Object.assign(STAGE, { loaded: STAGE.loaded ?? 'تم التحميل', unloaded: 'تم التفريغ' });
+export const BILL_UNIT: Record<string, string> = { trip: 'بالرحلة', km: 'بالكيلومتر', ton: 'بالطن' };
+export const FREIGHT_MODE: Record<string, string> = { ftl: 'شاحنة كاملة', ltl: 'حمولة جزئية' };
+export const kg = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 1 })} كغ`);

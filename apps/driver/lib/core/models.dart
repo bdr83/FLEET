@@ -45,6 +45,7 @@ class DriverTask {
     this.hasProof = false,
     this.taskRef,
     this.ticket,
+    this.freight,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -55,6 +56,8 @@ class DriverTask {
   final bool hasProof;
   /// Concrete loads: the delivery ticket (ticket_no, volume_m3, batched_at, signed, planned_arrival, site_ready, mix_code).
   final Map<String, dynamic>? ticket;
+  /// Freight trips: the waybill (waybill_no, mode, cargo, pickup, dropoff, trailer_plate, loaded_weight_kg, seal_no, received_by).
+  final Map<String, dynamic>? freight;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -68,6 +71,7 @@ class DriverTask {
         hasProof: j['has_proof'] == true,
         taskRef: j['ref'],
         ticket: _map(j['ticket']),
+        freight: _map(j['freight']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
@@ -83,9 +87,16 @@ class DriverTask {
         hasProof: hasProof ?? this.hasProof,
         taskRef: taskRef,
         ticket: ticket ?? this.ticket,
+        freight: freight,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
+  /// A haulage trip with its waybill: at the pickup → loaded (weight, seal) → on the road → at the drop-off → unloaded (receiver).
+  bool get isFreight => sectorPack == 'freight@1' && freight != null;
+  String? get waybillNo => freight?['waybill_no'] as String?;
+  Map<String, dynamic> get cargo => _map(freight?['cargo']) ?? const {};
+  String? get trailerPlate => freight?['trailer_plate'] as String?;
+  String get pickupLine => (attributes['pickup_address'] as String?) ?? addressLine(pickup) ?? '';
   /// A concrete load planned from a pour order (it has a ticket). A bare concrete@1 task keeps the simple flow.
   bool get isConcrete => sectorPack == 'concrete@1' && ticket != null;
   /// A day-shift of a driver placed with a customer (driver supply): check in at the site, check out at the end.
@@ -122,7 +133,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -188,10 +199,11 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
+  if (t.isFreight) return _freightActions(t);
   if (t.isStaffing) return _staffingActions(t, now ?? DateTime.now());
   if (t.isInternal) return _internalActions(t);
   if (t.isRoute) return _routeActions(t);
@@ -230,6 +242,24 @@ List<TaskAction> _concreteActions(DriverTask t) {
         'at_site' => [TaskAction.pourStart, TaskAction.fail],
         'pour_start' => [TaskAction.pourEnd],
         _ => t.hasProof ? [TaskAction.complete] : [TaskAction.ticket],
+      };
+    default:
+      return [];
+  }
+}
+
+/// Haulage trip: accept → at the pickup → loaded (weight, seal) → on the road → at the drop-off → unloaded (receiver) → done.
+List<TaskAction> _freightActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return switch (t.stage) { null => [TaskAction.atPickup], 'at_pickup' => [TaskAction.loaded], _ => [TaskAction.start] };
+    case 'in_progress':
+      return switch (t.stage) {
+        'at_dropoff' => [TaskAction.unloaded, TaskAction.fail],
+        'unloaded' => [TaskAction.complete],
+        _ => [TaskAction.atDropoff, TaskAction.fail],
       };
     default:
       return [];
@@ -284,6 +314,8 @@ List<TaskAction> _routeActions(DriverTask t) {
 /// The button text, worded for the kind of task.
 String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
     ? (concreteActionLabels[a] ?? actionLabels[a]!)
+    : t.isFreight
+    ? (freightActionLabels[a] ?? actionLabels[a]!)
     : t.isStaffing
         ? (staffingActionLabels[a] ?? actionLabels[a]!)
         : t.isInternal
@@ -325,6 +357,29 @@ int distValueFils(List<DistItem> items, Map<String, double> qty) {
 /// "12" / "2.5" with up to 3 decimals.
 String qtyText(double q) => q == q.roundToDouble() ? q.toInt().toString() : q.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '');
 
+const freightActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.atPickup: 'وصلت لنقطة التحميل',
+  TaskAction.loaded: 'تم التحميل',
+  TaskAction.start: 'انطلقت إلى التفريغ',
+  TaskAction.atDropoff: 'وصلت لنقطة التفريغ',
+  TaskAction.unloaded: 'تم التفريغ والتسليم',
+  TaskAction.complete: 'إنهاء الرحلة',
+  TaskAction.fail: 'تعذّر إكمال الرحلة',
+};
+
+/// Same codes as the API (freight FAIL_REASONS).
+const freightFailReasons = {
+  'truck_breakdown': 'عطل الشاحنة',
+  'refused_by_consignee': 'رفض المستلم',
+  'weight_mismatch': 'اختلاف الوزن',
+  'cargo_damaged': 'حمولة تالفة',
+  'address_not_found': 'لم أجد العنوان',
+  'cargo_not_ready': 'الحمولة غير جاهزة',
+  'customer_canceled': 'ألغاه العميل',
+  'other': 'سبب آخر',
+};
+
 const internalActionLabels = {
   TaskAction.accept: 'قبول المشوار',
   TaskAction.vehicleOut: 'استلمت المركبة',
@@ -353,6 +408,7 @@ const concreteActionLabels = {
 };
 
 const actionLabels = {
+  TaskAction.unloaded: 'تم التفريغ',
   TaskAction.accept: 'قبول المهمة',
   TaskAction.atPickup: 'وصلت لنقطة الاستلام',
   TaskAction.pickedUp: 'استلمت الشحنة',
@@ -381,6 +437,7 @@ const stageLabels = {
   'at_site': 'في الموقع',
   'pour_start': 'جارٍ الصب',
   'pour_end': 'انتهى الصب',
+  'unloaded': 'فُرّغت',
   'check_in': 'سجّل الحضور',
   'check_out': 'سجّل الانصراف',
   'vehicle_out': 'المركبة معك',
@@ -399,7 +456,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -446,6 +503,7 @@ const failReasons = {
 
 /// Readable Arabic for the server's rejection reasons in /driver/sync.
 const rejectReasons = {
+  'receiver_required': 'اكتب اسم المستلم',
   'wrong_pin': 'رمز المستلم غير صحيح',
   'pin_locked': 'أُقفل الرمز بعد 5 محاولات خاطئة. سلّم بصورة أو توقيع وسيراجعها المكتب',
   'proof_required': 'التسليم يحتاج رمز المستلم أو صورة',
