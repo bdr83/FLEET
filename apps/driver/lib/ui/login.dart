@@ -3,7 +3,7 @@ import '../core/api.dart';
 import '../core/config.dart';
 import 'theme.dart';
 
-/// Phone → SMS code → (company, if the number works for several).
+/// Email + password (or phone → SMS code) → (company, if the account works for several).
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override
@@ -12,7 +12,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _phone = TextEditingController(), _code = TextEditingController();
-  int _step = 0; // 0 phone, 1 code, 2 company
+  final _email = TextEditingController(), _password = TextEditingController();
+  int _step = 3; // 3 email, 0 phone, 1 code, 2 company
   bool _busy = false;
   String? _error, _devCode;
   List<Map<String, dynamic>> _companies = [];
@@ -24,7 +25,10 @@ class _LoginScreenState extends State<LoginScreen> {
     } on ApiException catch (e) {
       // on the code step a 400/401 means a wrong or expired code, not an expired session
       final bad = e.status == 400 || e.status == 401;
-      setState(() => _error = bad && _step == 1 ? 'رمز التحقق غير صحيح أو انتهت صلاحيته' : bad && _step == 0 ? 'رقم الجوال غير صحيح' : e.message);
+      setState(() => _error = bad && _step == 3 ? 'البريد أو كلمة المرور غير صحيحة'
+          : e.status == 429 && _step == 3 ? 'محاولات كثيرة، حاول بعد ربع ساعة'
+          : e.status == 503 && _step == 0 ? 'الدخول برقم الجوال غير متاح حاليًا، ادخل بالبريد'
+          : bad && _step == 1 ? 'رمز التحقق غير صحيح أو انتهت صلاحيته' : bad && _step == 0 ? 'رقم الجوال غير صحيح' : e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -50,6 +54,38 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                   const SizedBox(height: 12),
                 ],
+                if (_step == 3) ...[
+                  TextField(
+                    key: const Key('email'),
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    textDirection: TextDirection.ltr,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.email],
+                    decoration: const InputDecoration(labelText: 'البريد الإلكتروني'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const Key('password'),
+                    controller: _password,
+                    obscureText: true,
+                    textDirection: TextDirection.ltr,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: const InputDecoration(labelText: 'كلمة المرور'),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _busy ? null : () => _run(() async {
+                      final ms = await s.signInWithPassword(_email.text, _password.text);
+                      if (!s.signedIn) {
+                        if (ms.isEmpty) throw ApiException(403, 'هذا الحساب غير مرتبط بأي شركة. اطلب من المكتب إضافتك كسائق');
+                        setState(() { _companies = ms; _step = 2; });
+                      }
+                    }),
+                    child: const Text('دخول'),
+                  ),
+                  TextButton(onPressed: () => setState(() { _step = 0; _error = null; }), child: const Text('الدخول برقم الجوال')),
+                ],
                 if (_step == 0) ...[
                   TextField(
                     key: const Key('phone'),
@@ -67,6 +103,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     }),
                     child: const Text('إرسال رمز التحقق'),
                   ),
+                  TextButton(onPressed: () => setState(() { _step = 3; _error = null; }), child: const Text('الدخول بالبريد')),
                 ],
                 if (_step == 1) ...[
                   Text('أرسلنا رمزًا إلى ${_normalize(_phone.text)}', textDirection: TextDirection.rtl),
@@ -93,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   TextButton(onPressed: () => setState(() { _step = 0; _code.clear(); }), child: const Text('تغيير الرقم')),
                 ],
-                if (_step == 0) ...[
+                if (_step == 0 || _step == 3) ...[
                   const SizedBox(height: 24),
                   TextButton.icon(
                     onPressed: () => _server(context),

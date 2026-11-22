@@ -150,7 +150,7 @@ function AddMember({ onClose, onDone }: { onClose: () => void; onDone: () => voi
           <label className="field">طريقة الدخول<select {...bind('by')}><option value="email">البريد وكلمة المرور</option><option value="phone">رقم الجوال</option></select></label>
           {f.by === 'email' ? <>
             <label className="field">البريد الإلكتروني<input {...bind('email')} type="email" dir="ltr" required /></label>
-            <label className="field">كلمة مرور أولى <span className="muted">(8 أحرف على الأقل، يغيّرها لاحقًا)</span><input {...bind('password')} type="text" dir="ltr" minLength={8} autoComplete="off" /></label>
+            <label className="field">كلمة مرور أولى <span className="muted">(8 أحرف على الأقل، يغيّرها لاحقًا؛ تُتجاهل إن كان للحساب كلمة مرور)</span><input {...bind('password')} type="text" dir="ltr" minLength={8} autoComplete="off" /></label>
           </> : (
             <label className="field">الجوال<input {...bind('phone')} className="num" inputMode="tel" required placeholder="+965 5xxx xxxx" /></label>
           )}

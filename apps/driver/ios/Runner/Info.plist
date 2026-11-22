@@ -10,6 +10,8 @@
 	<string>لتصوير إثبات التسليم عند تعذّر رمز المستلم.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>لاختيار صورة إثبات التسليم.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array><string>location</string></array>
 	<key>LSApplicationQueriesSchemes</key>

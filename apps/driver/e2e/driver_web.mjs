@@ -28,7 +28,8 @@ const T = co.access_token, le = co.legal_entity_id;
 const plate = `${stamp.slice(0, 2)}-${stamp.slice(2)}`;
 await call('POST', '/v1/assets', { legal_entity_id: le, asset_type: 'motorbike', plate_no: plate, odometer_km: 1200 }, T);
 const driverPhone = `5${stamp}`;
-const w = await call('POST', '/v1/workers', { legal_entity_id: le, kind: 'courier', display_name: 'ناصر المطيري', phone: `+965${driverPhone}` }, T);
+const driverEmail = `driver-${stamp}@example.com`;
+const w = await call('POST', '/v1/workers', { legal_entity_id: le, kind: 'courier', display_name: 'ناصر المطيري', phone: `+965${driverPhone}`, email: driverEmail, password: 'driver-pass-1' }, T);
 const shop = await call('POST', '/v1/customers', { legal_entity_id: le, name: 'متجر العطور' }, T); // COD money is held for a customer
 const task = await call('POST', '/v1/tasks', { legal_entity_id: le, customer_id: shop.id, sector_pack: 'delivery@1', ref: `APP-${stamp}`, attributes: {
   dropoff: { area: 'السالمية', block: '5', street: 'سالم المبارك', house: '12', lat: 29.335, lng: 48.075 },
@@ -56,16 +57,15 @@ const see = (t) => p.locator(`flt-semantics[aria-label*="${t}"], flt-semantics:h
 const btn = (name) => p.getByRole('button', { name, exact: false }).first();
 try {
   await p.goto(APP);
-  await typeInto(p.getByLabel('رقم الجوال'), driverPhone);
+  await typeInto(p.getByLabel('البريد الإلكتروني'), driverEmail);
+  await typeInto(p.getByLabel('كلمة المرور'), 'wrong-password');
   await shot(p, 'a01-login');
-  await btn('إرسال رمز التحقق').click();
-  const dev = p.getByText(/رمز التطوير: \d{6}/);
-  await dev.waitFor();
-  const code = (await dev.textContent()).match(/\d{6}/)[0];
-  await typeInto(p.getByLabel('رمز التحقق'), code);
+  await btn('دخول').click();
+  await see('البريد أو كلمة المرور غير صحيحة').waitFor();
+  await typeInto(p.getByLabel('كلمة المرور'), 'driver-pass-1', { clear: true });
   await btn('دخول').click();
   await see('ناصر المطيري').waitFor();
-  ok('دخول المندوب برقم كويتي من 8 أرقام ورمز التحقق');
+  ok('دخول المندوب بالبريد وكلمة المرور، والخاطئة مرفوضة');
 
   await see('سالم المبارك').waitFor();
   await shot(p, 'a02-home');
