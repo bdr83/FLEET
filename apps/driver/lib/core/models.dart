@@ -46,6 +46,7 @@ class DriverTask {
     this.taskRef,
     this.ticket,
     this.freight,
+    this.shuttle,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -58,6 +59,8 @@ class DriverTask {
   final Map<String, dynamic>? ticket;
   /// Freight trips: the waybill (waybill_no, mode, cargo, pickup, dropoff, trailer_plate, loaded_weight_kg, seal_no, received_by).
   final Map<String, dynamic>? freight;
+  /// Staff transport trips: {trip_id, riders: [{id, name, staff_no, phone, stop_seq, event}]}.
+  final Map<String, dynamic>? shuttle;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -72,10 +75,11 @@ class DriverTask {
         taskRef: j['ref'],
         ticket: _map(j['ticket']),
         freight: _map(j['freight']),
+        shuttle: _map(j['shuttle']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -88,9 +92,17 @@ class DriverTask {
         taskRef: taskRef,
         ticket: ticket ?? this.ticket,
         freight: freight,
+        shuttle: shuttle ?? this.shuttle,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
+  /// A staff-transport trip (shuttle pack): stops with times and the riders to mark boarded or absent.
+  bool get isShuttle => sectorPack == 'shuttle@1';
+  List<ShuttleStop> get shuttleStops => [for (final x in (attributes['stops'] as List? ?? const [])) if (x is Map) ShuttleStop.fromJson(Map<String, dynamic>.from(x))];
+  List<Rider> get riders => [for (final x in (shuttle?['riders'] as List? ?? const [])) if (x is Map) Rider.fromJson(Map<String, dynamic>.from(x))];
+  int get boardedCount => riders.where((r) => r.event == 'boarded').length;
+  int? get capacity => attributes['capacity'] is num ? (attributes['capacity'] as num).toInt() : null;
+  bool get toWork => attributes['direction'] != 'from_work';
   /// A haulage trip with its waybill: at the pickup → loaded (weight, seal) → on the road → at the drop-off → unloaded (receiver).
   bool get isFreight => sectorPack == 'freight@1' && freight != null;
   String? get waybillNo => freight?['waybill_no'] as String?;
@@ -335,7 +347,44 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
             ? (internalActionLabels[a] ?? actionLabels[a]!)
             : t.isDistribution
                 ? (distActionLabels[a] ?? actionLabels[a]!)
-                : actionLabels[a]!;
+                : t.isShuttle
+                    ? (shuttleActionLabels[a] ?? actionLabels[a]!)
+                    : actionLabels[a]!;
+
+const shuttleActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.start: 'انطلقت',
+  TaskAction.complete: 'وصلت وأنهيت الرحلة',
+  TaskAction.fail: 'تعذّر تشغيل الرحلة',
+};
+
+/// Same codes as the API (shuttle FAIL_REASONS).
+const shuttleFailReasons = {
+  'vehicle_breakdown': 'عطل في الحافلة',
+  'accident': 'حادث',
+  'road_closed': 'الطريق مغلق',
+  'trip_canceled': 'أُلغيت الرحلة',
+  'other': 'سبب آخر',
+};
+
+/// A stop of a staff-transport route with its planned time.
+class ShuttleStop {
+  ShuttleStop({required this.name, this.area, required this.time});
+  factory ShuttleStop.fromJson(Map<String, dynamic> j) => ShuttleStop(name: j['name'] as String? ?? '', area: j['area'] as String?, time: j['time'] as String? ?? '');
+  final String name, time;
+  final String? area;
+}
+
+/// An employee on the trip and the standing mark: boarded, no_show or null (not marked yet).
+class Rider {
+  Rider({required this.id, required this.name, this.staffNo, this.phone, required this.stopSeq, this.event});
+  factory Rider.fromJson(Map<String, dynamic> j) => Rider(id: j['id'] as String, name: j['name'] as String? ?? '', staffNo: j['staff_no'] as String?, phone: j['phone'] as String?,
+      stopSeq: (j['stop_seq'] as num?)?.toInt() ?? 1, event: j['event'] as String?);
+  final String id, name;
+  final String? staffNo, phone, event;
+  final int stopSeq;
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'staff_no': staffNo, 'phone': phone, 'stop_seq': stopSeq, 'event': event};
+}
 
 const distActionLabels = {
   TaskAction.accept: 'قبول المسار',
@@ -470,7 +519,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -547,6 +596,7 @@ const rejectReasons = {
   'quantity_exceeds_plan': 'الكمية أكثر من المخطط لهذا التوقف',
   'item_not_planned': 'صنف غير مخطط لهذا التوقف',
   'cash_required': 'أدخل المبلغ المحصّل',
+  'unknown_rider': 'الراكب ليس على هذا الخط، حدّث القائمة',
 };
 
 const tempClassLabels = {'chilled': 'مبرد', 'frozen': 'مجمد', 'ambient': 'عادي'};

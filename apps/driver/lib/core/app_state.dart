@@ -193,6 +193,15 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude, ...extra});
   }
 
+  /// Staff transport: marks a rider boarded or absent (shown at once, queued offline; the last mark counts).
+  Future<void> markRider(String taskId, String riderId, String event) async {
+    _local(taskId, (t) => t.copyWith(shuttle: {
+          ...?t.shuttle,
+          'riders': [for (final r in t.riders) r.id == riderId ? {...r.toJson(), 'event': event} : r.toJson()],
+        }));
+    await _syncOp(taskId, {'type': 'board', 'rider_id': riderId, 'event': event});
+  }
+
   /// Cold chain: a temperature reading on the route, typed from the truck's display (queued offline like any op).
   Future<String?> tempReading(String routeTaskId, double celsius) async {
     final r = await _syncOp(routeTaskId, {'type': 'temp', 'reading_c': celsius}, wait: true);

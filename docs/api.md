@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -414,3 +414,20 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `POST /orders/:external_id/cancel`، `POST /orders/:external_id/return` | `{reason}` |
 
 المفتاح الخاطئ أو الملغى، أو المتجر الموقوف، أو الشركة الموقوفة، أو إيقاف النشاط: 401. المتجر يرى طلباته فقط.
+
+## قطاع نقل الموظفين shuttle (القطاع 11)
+
+الخط ينقل موظفي عميل (أو موظفي الشركة) بين السكن والعمل. لكل خط اتجاه (`to_work` أو `from_work`)، وموعد انطلاق، ومدة، وأيام تشغيل (أيام ISO، والافتراضي من الأحد إلى الخميس)، ومحطات مرتبة بالدقائق بعد الانطلاق، وحافلة وسائق افتراضيان، وركاب. كل يوم تشغيل تُولَّد رحلة لكل خط: مهمة `shuttle@1` تحجز الحافلة والسائق حصريًا لنافذة الرحلة. السائق يسجّل صعود كل راكب أو غيابه، وهذا سجل لا يُعدَّل، وآخر تسجيل هو المعتمد.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/shuttle/routes`، `PATCH /routes/:id` | `{legal_entity_id, code, name, customer_id?, direction, depart_time HH:MM, duration_min, days[], stops[{name, area?, lat?, lng?, offset_min}], capacity?, asset_id?, driver_worker_id?}`؛ التعديل يحتاج `version` |
+| `GET/POST /routes/:id/riders`، `PATCH /riders/:id` | الركاب `{riders[≤200]: {name, staff_no?, phone?, stop_seq}}`؛ الرقم الوظيفي المكرر في الخط يُتخطى؛ الإيقاف بـ `active: false` |
+| `POST /trips/generate` | `{date?, route_ids?}` يعيد `{created, existing, skipped[{code, reason}]}`. أسباب التخطي: `no_vehicle`، `no_driver`، `vehicle_booked`، `driver_booked`، `vehicle_out_of_service`، `driver_inactive`، `past` |
+| `GET /trips?date&customer_id`، `GET /trips/:id` | الرحلات بعدد الصاعدين والغائبين، والتفاصيل مع المحطات وكشف الركاب |
+| `POST /trips/:id/board` | تسجيل المكتب أو تصحيحه `{rider_id, event: boarded\|no_show}` |
+| `POST /trips/:id/cancel` | `{reason}` قبل الانطلاق |
+| `GET /exceptions?date` | رحلات لم تنطلق بعد 10 دقائق [تخمين]، خطوط تعمل اليوم بلا رحلة، فوق السعة، غياب 3 رحلات متتالية [تخمين] |
+| `GET /report?from&to` | لكل عميل: الرحلات والمنفذة والملغاة، الانطلاق في الموعد، الركاب، الغياب، إشغال المقاعد |
+
+السائق: تحمل `GET /v1/driver/tasks` حقل `shuttle {trip_id, riders[{id, name, staff_no, stop_seq, event}]}`. وفي `POST /v1/driver/sync` عملية جديدة `{type: 'board', task_id, rider_id, event}` تُقبل بعد قبول الرحلة وحتى انتهائها.

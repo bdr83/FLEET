@@ -202,6 +202,21 @@ void main() {
     });
   });
 
+  test('staff transport trip: stops, riders, marks and the simple flow', () {
+    final base = task('assigned', pack: 'shuttle@1', attrs: {'kind': 'trip', 'direction': 'from_work', 'capacity': 3,
+      'stops': [{'name': 'المصفاة', 'time': '16:00'}, {'name': 'السكن', 'area': 'المهبولة', 'time': '16:45'}]});
+    final t = DriverTask(id: 't', status: 'assigned', sectorPack: 'shuttle@1', attributes: base.attributes, version: 1,
+        shuttle: {'trip_id': 'x', 'riders': [{'id': 'a', 'name': 'أنيل', 'stop_seq': 2, 'event': 'boarded'}, {'id': 'b', 'name': 'محمد', 'stop_seq': 2}]});
+    expect((t.isShuttle, t.toWork, t.capacity, t.shuttleStops.last.area, t.riders.length, t.boardedCount), (true, false, 3, 'المهبولة', 2, 1));
+    final m = t.copyWith(shuttle: {...t.shuttle!, 'riders': [for (final r in t.riders) {...r.toJson(), 'event': 'boarded'}]});
+    expect(m.boardedCount, 2);
+    expect(nextActions(t), [TaskAction.accept]);
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.start]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.complete, TaskAction.fail]);
+    expect(actionLabel(t, TaskAction.start), 'انطلقت');
+    expect(failReasonsFor(t), shuttleFailReasons);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');
