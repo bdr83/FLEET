@@ -113,6 +113,10 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isShuttle) ...[
+          _ShuttleCard(t: t),
+          const SizedBox(height: 12),
+        ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight ? 'التفريغ في' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
@@ -431,5 +435,52 @@ class _ActionsState extends State<_Actions> {
     }
     await s.setStatus(task.id, 'failed', reasonCode: reason, note: note.text.trim().isEmpty ? null : note.text.trim());
     if (context.mounted) toast(context, task.isDelivery ? 'سُجّل التعذّر. أعد الشحنة للمرسل ثم سجّل الإرجاع' : 'سُجّل التعذّر');
+  }
+}
+
+/// Staff transport trip: the stops with their times and, under each, the riders to mark boarded or absent.
+class _ShuttleCard extends StatelessWidget {
+  const _ShuttleCard({required this.t});
+  final DriverTask t;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final stops = t.shuttleStops;
+    final riders = t.riders;
+    final open = ['accepted', 'in_progress'].contains(t.status);
+    final absent = riders.where((r) => r.event == 'no_show').length;
+    return Card(key: const Key('shuttle-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text('${t.toWork ? 'نقل موظفين إلى العمل' : 'نقل موظفين من العمل'} · ${t.attributes['route_code'] ?? ''}', style: text.labelMedium),
+      Text('${t.attributes['route_name'] ?? ''}', style: text.titleLarge),
+      if (t.attributes['customer_name'] != null) Text('${t.attributes['customer_name']}'),
+      const SizedBox(height: 6),
+      Text('صعد ${t.boardedCount} من ${riders.length}${absent > 0 ? ' · غائب $absent' : ''}${t.capacity != null ? ' · المقاعد ${t.capacity}' : ''}',
+          key: const Key('board-count'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      if (!open && t.status == 'assigned') const Padding(padding: EdgeInsets.only(top: 4), child: Text('اقبل الرحلة لتسجيل صعود الركاب')),
+      for (final (i, st) in stops.indexed) ...[
+        const Divider(),
+        Row(children: [
+          Ltr(st.time, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(st.area != null ? '${st.name} · ${st.area}' : st.name, style: text.titleMedium)),
+        ]),
+        for (final r in riders.where((r) => r.stopSeq == i + 1))
+          Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [
+            Icon(r.event == 'boarded' ? Icons.check_circle : r.event == 'no_show' ? Icons.cancel_outlined : Icons.radio_button_unchecked,
+                size: 20, color: r.event == 'boarded' ? Colors.green : r.event == 'no_show' ? scheme.error : null),
+            const SizedBox(width: 6),
+            Expanded(child: Text(r.staffNo != null ? '${r.name} (${r.staffNo})' : r.name)),
+            if (open) ...[
+              Semantics(button: true, label: 'صعد ${r.name}', excludeSemantics: true, child: TextButton(
+                  onPressed: r.event == 'boarded' ? null : () => s.markRider(t.id, r.id, 'boarded'), child: const Text('صعد'))),
+              Semantics(button: true, label: 'غائب ${r.name}', excludeSemantics: true, child: TextButton(
+                  onPressed: r.event == 'no_show' ? null : () => s.markRider(t.id, r.id, 'no_show'), child: const Text('غائب'))),
+            ],
+          ])),
+      ],
+    ])));
   }
 }

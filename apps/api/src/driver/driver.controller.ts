@@ -14,11 +14,13 @@ import * as internal from '../sectors/internal/internal';
 import { vehicleBack, vehicleOut } from '../sectors/internal/internal.controller';
 import * as dist from '../sectors/distribution/distribution';
 import * as freight from '../sectors/freight/freight';
+import * as shuttle from '../sectors/shuttle/shuttle';
+import { markRider } from '../sectors/shuttle/shuttle.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
 const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -45,7 +47,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -287,7 +289,12 @@ export class DriverController {
                      FROM ops.load_ticket l JOIN ops.pour_order p ON p.id = l.pour_order_id WHERE l.task_id = t.id) AS ticket,
                   (SELECT jsonb_build_object('waybill_no', s.waybill_no, 'mode', s.mode, 'cargo', s.cargo, 'pickup', s.pickup, 'dropoff', s.dropoff,
                           'trailer_plate', tr.plate_no, 'loaded_weight_kg', s.loaded_weight_kg, 'seal_no', s.seal_no, 'received_by', s.received_by)
-                     FROM ops.freight_shipment s LEFT JOIN fleet.asset tr ON tr.id = s.trailer_asset_id WHERE s.task_id = t.id) AS freight
+                     FROM ops.freight_shipment s LEFT JOIN fleet.asset tr ON tr.id = s.trailer_asset_id WHERE s.task_id = t.id) AS freight,
+                  (SELECT jsonb_build_object('trip_id', st.id, 'riders', COALESCE((
+                      SELECT jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'staff_no', x.staff_no, 'phone', x.phone, 'stop_seq', x.stop_seq, 'event', m.event) ORDER BY x.stop_seq, x.name)
+                        FROM ops.shuttle_rider x LEFT JOIN LATERAL (SELECT b.event FROM ops.shuttle_board b WHERE b.trip_id = st.id AND b.rider_id = x.id ORDER BY b.occurred_at DESC LIMIT 1) m ON true
+                       WHERE x.route_id = st.route_id AND (x.active OR m.event IS NOT NULL)), '[]'::jsonb))
+                     FROM ops.shuttle_trip st WHERE st.task_id = t.id) AS shuttle
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE (t.status IN ('assigned','accepted','in_progress')
                    -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
@@ -313,7 +320,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -334,6 +341,8 @@ export class DriverController {
           received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }) };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
+      // a rider boarded or absent on a staff-transport trip (shuttle pack)
+      if (type === 'board') return { ...base, type: 'board' as const, rider_id: v.uuid(o.rider_id, `ops[${i}].rider_id`, { required: true })!, event: v.oneOf(o.event, `ops[${i}].event`, shuttle.BOARD_EVENTS, { required: true })! };
       // a temperature reading on a cold-chain route (coldchain pack), typed by the driver from the truck's display
       if (type === 'temp') return { ...base, type: 'temp' as const, reading_c: dist.celsius(o.reading_c, `ops[${i}].reading_c`), stop_task_id: v.uuid(o.stop_task_id, `ops[${i}].stop_task_id`) };
       if (type === 'ticket') {
@@ -445,6 +454,14 @@ export class DriverController {
             if ((e as { code?: string }).code === '23505') { results.push({ client_op_id: op.client_op_id, result: 'duplicate' }); continue; }
             throw e;
           }
+          continue;
+        }
+
+        if (op.type === 'board') {
+          if (!shuttle.isShuttle(t.sector_pack)) { reject('not_supported'); continue; }
+          const bad = await markRider(c, a, { taskId: op.task_id, riderId: op.rider_id, event: op.event, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id });
+          if (bad) { reject(bad, t.status); continue; }
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           continue;
         }
 
@@ -618,11 +635,12 @@ type SyncOp =
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
       weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
+  | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;
