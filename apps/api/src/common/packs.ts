@@ -1,6 +1,7 @@
 /** Sector packs a company can turn on. The core (tasks, fleet, customers, billing) is always on. */
 export const PACKS = [
   { code: 'delivery', sector: 1, label: 'توصيل الطلبات والمندوبين' },
+  { code: 'freight', sector: 2, label: 'الشحن والنقل البري' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي' },

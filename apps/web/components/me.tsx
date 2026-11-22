@@ -5,7 +5,7 @@ export interface Me {
   user_id: string; phone: string | null; email?: string | null; display_name: string | null;
   tenant_id: string; tenant_name: string | null; tenant_status: string | null;
   role: string; permissions: string[];
-  /** Sector packs the company turned on (delivery, staffing, concrete, internal, distribution). */
+  /** Sector packs the company turned on (delivery, freight, staffing, concrete, internal, distribution). */
   packs?: string[];
   scope: { legal_entity_ids: string[]; branch_ids: string[] };
   legal_entities: { id: string; name: string; country: string; currency: string; timezone: string }[];

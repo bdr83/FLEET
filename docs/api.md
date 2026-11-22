@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، staffing، concrete، internal، distribution) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -317,3 +317,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /v1/distribution/report?from&to` | `reports:read` | لكل مسار في الفترة: التوقفات المنجزة والمتعذّرة، الكم، قيمة المخطط والمسلَّم والمرتجع، النقد المستحق والمحصّل، مع المجاميع |
 
 تطبيق السائق: على المسار `task_status accepted` ← `milestone load_checked {odometer_km}` ← `in_progress` (فتنتقل التوقفات إلى «مقبولة») ← نوع عملية جديد `stop {task_id, delivered, returned?, cash_collected?, received_by?}` أو `{closed_reason}` لكل توقف ← `milestone route_back {odometer_km}` (بعد إغلاق كل التوقفات) ← `completed`. لا يُرسل `task_status` على مهمة التوقف. أسباب الرفض الجديدة: `route_not_started`، `stop_already_recorded`، `item_not_planned`، `quantity_exceeds_plan`، `cash_required`، `stops_open`. أسباب التعذّر: shop_closed, refused, no_cash, no_space, vehicle_breakdown, other.
+
+## قطاع الشحن والنقل البري freight@1 (القطاع 2)
+
+أمر النقل مهمة واحدة `freight@1` مع بوليصة في `ops.freight_shipment`. موعد التحميل وموعد التسليم هما نافذة المهمة، فالإسناد الحصري يحجز الشاحنة والسائق للرحلة. النشاط `freight` يُفعَّل من الإعدادات.
+
+| الطلب | الوصف |
+|---|---|
+| `GET/PUT /v1/freight/settings?legal_entity_id=` | الانتظار المجاني عند كل طرف (افتراضي 120 دقيقة [تخمين]) ونسبة فرق الوزن المسموحة (2%) |
+| `GET/POST /v1/freight/carriers`، `PATCH /v1/freight/carriers/:id` | الناقلون من الباطن |
+| `GET /v1/freight/shipments?from&to&status=open\|done\|failed\|canceled` | الشحنات حسب موعد التحميل |
+| `POST /v1/freight/shipments` | أمر نقل: `waybill_no`، `customer_id`، `mode` ftl/ltl، `cargo {description, packages, weight_kg, volume_m3}`، `pickup`، `dropoff`، `pickup_at`، `deliver_by`، `planned_km`، `bill_unit` trip/km/ton. نفس البوليصة مرة أخرى تعيد نفس الشحنة |
+| `GET /v1/freight/shipments/:id` | الشحنة ومراحلها والمصاريف واختلاف الوزن |
+| `POST /v1/freight/shipments/:id/plan` | المقطورة `trailer_asset_id`، أو ناقل `carrier_id` مع `carrier_cost` (يحتاج المهمة بلا سائق). الشاحنة والسائق بـ `POST /v1/tasks/:id/assign` |
+| `POST /v1/freight/shipments/:id/carrier-delivered` | المكتب يسجل تسليم رحلة الناقل: `received_by`، `delivered_weight_kg` |
+| `POST /v1/freight/shipments/:id/expenses` | مصروف رحلة (fuel، tolls، parking، other) يدخل التسوية |
+| `GET /v1/freight/shipments/:id/settlement` | الإيراد من عقد العميل ناقص كلفة الناقل والمصاريف = الربح (تقديري قبل التسليم) |
+| `GET /v1/freight/report?from&to` | ربح كل رحلة والمؤشرات: كلفة الكيلومتر، ربح الرحلة، في الموعد، استغلال الحمولة (يحتاج `capacity.kg` للشاحنة)، ساعات الانتظار |
+| `GET /v1/freight/exceptions` | بلا تخطيط خلال 24 ساعة، متأخرة، انتظار بعد الوقت المجاني، اختلاف وزن |
+
+تطبيق السائق: المراحل `at_pickup` → `loaded` (مع `weight_kg` و`seal_no` اختياريين) → بدء الرحلة → `at_dropoff` → `unloaded` (يلزم `received_by`، و`weight_kg` اختياري). البدء يحتاج `loaded` والإكمال يحتاج `unloaded`. عند الإكمال تُكتب الكميات: `trip: 1` أو `km` المخطط أو `ton` من الوزن المسلَّم، و`hour` للانتظار بعد الوقت المجاني عند كل طرف بربع الساعة. أسباب التعثر: truck_breakdown، refused_by_consignee، weight_mismatch، cargo_damaged، address_not_found، cargo_not_ready، customer_canceled، other.

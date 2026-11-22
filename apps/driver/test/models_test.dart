@@ -180,4 +180,34 @@ void main() {
       expect(rejectReasons['stops_open'], isNotNull);
     });
   });
+
+  group('freight trips', () {
+    DriverTask trip(String status, {String? stage}) => DriverTask(
+        id: 'f', status: status, sectorPack: 'freight@1', version: 1, stage: stage,
+        attributes: {'address': 'مشروع المطلاع، المطلاع', 'pickup_address': 'مصنع الحديد، الشعيبة', 'pickup': {'lat': 29.03, 'lng': 48.1}, 'dropoff': {'lat': 29.6, 'lng': 47.7}},
+        freight: {'waybill_no': 'WB-1', 'cargo': {'description': 'حديد', 'weight_kg': 18000}, 'trailer_plate': 'TL-1'});
+
+    test('the trip goes pickup → loaded → road → drop-off → unloaded → done', () {
+      expect(nextActions(trip('assigned')), [TaskAction.accept]);
+      expect(nextActions(trip('accepted')), [TaskAction.atPickup]);
+      expect(nextActions(trip('accepted', stage: 'at_pickup')), [TaskAction.loaded]);
+      expect(nextActions(trip('accepted', stage: 'loaded')), [TaskAction.start]);
+      expect(nextActions(trip('in_progress', stage: 'loaded')), [TaskAction.atDropoff, TaskAction.fail]);
+      expect(nextActions(trip('in_progress', stage: 'at_dropoff')), [TaskAction.unloaded, TaskAction.fail]);
+      expect(nextActions(trip('in_progress', stage: 'unloaded')), [TaskAction.complete]);
+      expect(actionLabel(trip('in_progress', stage: 'at_dropoff'), TaskAction.unloaded), 'تم التفريغ والتسليم');
+      expect(failReasonsFor(trip('in_progress')), freightFailReasons);
+    });
+    test('waybill, places and navigation target', () {
+      final t = trip('accepted');
+      expect(t.waybillNo, 'WB-1');
+      expect(t.cargo['weight_kg'], 18000);
+      expect(t.address, 'مشروع المطلاع، المطلاع');
+      expect(t.pickupLine, 'مصنع الحديد، الشعيبة');
+      expect(t.target, (lat: 29.03, lng: 48.1));
+      expect(trip('in_progress', stage: 'loaded').target, (lat: 29.6, lng: 47.7));
+      // without its waybill a freight@1 task keeps the simple flow
+      expect(DriverTask(id: 'x', status: 'accepted', sectorPack: 'freight@1', version: 1, attributes: const {}).isFreight, isFalse);
+    });
+  });
 }
