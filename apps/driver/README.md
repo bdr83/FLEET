@@ -3,7 +3,7 @@
 تطبيق عربي للمندوب والسائق على Android وiOS، يعمل مع واجهات `/v1/driver` في الخادم.
 
 ## ما يفعله
-- الدخول برقم الجوال ورمز التحقق، واختيار الشركة إن كان الرقم في أكثر من شركة. الجلسة في مخزن الجهاز الآمن (Keychain / Keystore).
+- الدخول بالبريد وكلمة المرور (يضيفهما المكتب مع السائق من صفحة السائقين) أو برقم الجوال ورمز التحقق، واختيار الشركة إن كان الحساب في أكثر من شركة. الجلسة في مخزن الجهاز الآمن (Keychain / Keystore).
 - الوردية: بدء وإنهاء مع المركبة وقراءة العدّاد. **الموقع يُتتبع أثناء الوردية فقط**، مع إشعار ظاهر على Android، ونقطة دورية كل دقيقتين إذا كان المندوب واقفًا [تخمين].
 - مهامي: القائمة، التفاصيل، الاتصال بالمستلم، الملاحة (Google Maps).
 - التوصيل: قبول، وصلت لنقطة الاستلام، استلمت الشحنة، بدء التوصيل، وصلت للمستلم، تسليم.
@@ -25,7 +25,7 @@ flutter run --dart-define=API_URL=http://10.0.2.2:3000 --dart-define=SHOW_DEV_CO
 ```bash
 flutter build web --no-web-resources-cdn --dart-define=API_URL=http://localhost:3000 --dart-define=SHOW_DEV_CODE=true --dart-define=E2E=true
 (cd build/web && python3 -m http.server 8080) &
-node e2e/driver_web.mjs                       # 9 خطوات: من الدخول إلى التسليم بالرمز والعهدة والموقع الحي
+node e2e/driver_web.mjs                       # 9 خطوات: من الدخول بالبريد إلى التسليم بالرمز والعهدة والموقع الحي
 node e2e/driver_concrete.mjs                  # 6 خطوات: رحلة الخلاطة وتذكرة التسليم
 node e2e/driver_staffing.mjs                  # 5 خطوات: مناوبة التوريد والحضور والانصراف
 node e2e/driver_internal.mjs                  # 5 خطوات: مشوار الأسطول الداخلي بالعدّاد والوقود
@@ -36,6 +36,16 @@ node e2e/driver_distribution.mjs              # 5 خطوات: المسار وق�
 - **Android:** `flutter build apk --release --dart-define=API_URL=https://<الخادم>` أو `flutter build appbundle` لمتجر Google Play. يحتاج Android SDK وتوقيعًا بمفتاح الشركة (`android/key.properties`) [تحقق محلي].
 - **iOS:** `flutter build ipa --dart-define=API_URL=https://<الخادم>` على جهاز Mac مع Xcode وحساب Apple Developer للشركة.
 - سير عمل GitHub Actions في `.github/workflows/driver-app.yml` يشغّل الاختبارات ويبني APK تلقائيًا بعد رفع المستودع.
+
+## iPhone عبر TestFlight
+
+workflow ‏**ios** (يدوي) يبني التطبيق على macOS ويرفعه إلى TestFlight بتوقيع تلقائي من Xcode، بلا شهادات يدوية. يحتاج مرة واحدة:
+1. حساب Apple Developer Program.
+2. في App Store Connect: تطبيق جديد بمعرّف الحزمة `com.q8hub.driver`.
+3. مفتاح API من App Store Connect → Users and Access → Integrations بدور Admin، وفي أسرار GitHub: `APPSTORE_KEY_ID` و`APPSTORE_ISSUER_ID` و`APPSTORE_KEY_P8` (محتوى ملف ‎.p8) و`APPLE_TEAM_ID`.
+4. Actions → ios → Run workflow. بعد معالجة Apple يظهر البناء في TestFlight، ويُضاف المختبرون من هناك (داخليون فورًا، وخارجيون بعد مراجعة Apple للنسخة التجريبية).
+
+خيار `upload` = false يبني فقط بلا توقيع للتأكد من سلامة البناء.
 
 ## قبل الإطلاق [تحقق محلي]
 - معرّف التطبيق `com.fleetplatform.fleet_driver` مؤقت: يُستبدل باسم الشركة.

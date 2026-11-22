@@ -53,14 +53,14 @@ function WorkerForm({ worker, readOnly, onClose, onDone }: { worker: Worker | nu
   const me = useMe();
   const { f, bind } = useForm({
     legal_entity_id: worker?.legal_entity_id ?? me.legal_entities[0]?.id ?? '', kind: worker?.kind ?? 'driver',
-    display_name: worker?.display_name ?? '', phone: '', status: worker?.status ?? 'active',
+    display_name: worker?.display_name ?? '', phone: '', email: '', password: '', status: worker?.status ?? 'active',
   });
   const { busy, error, run } = useAction();
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     void run(async () => {
       if (worker) await api(`/workers/${worker.id}`, { method: 'PATCH', body: { display_name: f.display_name, status: f.status } });
-      else await api('/workers', { method: 'POST', body: clean({ legal_entity_id: f.legal_entity_id, kind: f.kind, display_name: f.display_name, phone: f.phone }) });
+      else await api('/workers', { method: 'POST', body: clean({ legal_entity_id: f.legal_entity_id, kind: f.kind, display_name: f.display_name, phone: f.phone, email: f.email, password: f.email ? f.password : '' }) });
       onDone();
     });
   };
@@ -75,7 +75,9 @@ function WorkerForm({ worker, readOnly, onClose, onDone }: { worker: Worker | nu
           <label className="field">الاسم<input {...bind('display_name')} required maxLength={120} /></label>
           {!worker && <>
             <label className="field">الصفة<select {...bind('kind')}>{Object.entries(WORKER_KIND).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-            <label className="field">الجوال (لتفعيل تطبيق السائق)<input {...bind('phone')} className="num" inputMode="tel" placeholder="+965 5xxx xxxx" /></label>
+            <label className="field">الجوال<input {...bind('phone')} className="num" inputMode="tel" placeholder="+965 5xxx xxxx" /></label>
+            <label className="field">بريد الدخول لتطبيق السائق<input {...bind('email')} type="email" dir="ltr" /></label>
+            {f.email && <label className="field">كلمة مرور أولى <span className="muted">(8 أحرف على الأقل)</span><input {...bind('password')} type="text" dir="ltr" minLength={8} autoComplete="off" required /></label>}
           </>}
           {worker && (
             <label className="field">الحالة<select {...bind('status')}>{Object.entries(WORKER_STATUS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></label>

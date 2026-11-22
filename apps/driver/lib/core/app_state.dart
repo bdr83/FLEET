@@ -68,8 +68,14 @@ class AppState extends ChangeNotifier {
   }
 
   /// Returns the companies the number belongs to; signs in directly when there is one.
-  Future<List<Map<String, dynamic>>> verifyCode(String phone, String code) async {
-    final r = await api.postPublic('/v1/auth/otp/verify', {'phone': phone, 'code': code});
+  Future<List<Map<String, dynamic>>> verifyCode(String phone, String code) async =>
+      _afterLogin(await api.postPublic('/v1/auth/otp/verify', {'phone': phone, 'code': code}));
+
+  /// Email + password; same company handling as the phone login.
+  Future<List<Map<String, dynamic>>> signInWithPassword(String email, String password) async =>
+      _afterLogin(await api.postPublic('/v1/auth/login', {'email': email.trim(), 'password': password}));
+
+  Future<List<Map<String, dynamic>>> _afterLogin(dynamic r) async {
     _userToken = r['user_token'];
     final ms = (r['memberships'] as List).map((m) => Map<String, dynamic>.from(m)).toList();
     final drivers = ms.where((m) => m['role_code'] == 'driver').toList();

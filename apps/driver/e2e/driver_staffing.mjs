@@ -48,6 +48,7 @@ const see = (t) => p.locator(`flt-semantics[aria-label*="${t}"], flt-semantics:h
 const btn = (name) => p.getByRole('button', { name, exact: false }).first();
 try {
   await p.goto(APP);
+  await btn('الدخول برقم الجوال').click();
   await typeInto(p.getByLabel('رقم الجوال'), driverPhone);
   await btn('إرسال رمز التحقق').click();
   const dev = p.getByText(/رمز التطوير: \d{6}/);

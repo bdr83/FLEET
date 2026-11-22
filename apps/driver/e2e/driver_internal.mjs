@@ -52,6 +52,7 @@ async function odometer(km, fuel) {
 }
 try {
   await p.goto(APP);
+  await btn('الدخول برقم الجوال').click();
   await typeInto(p.getByLabel('رقم الجوال'), driverPhone);
   await btn('إرسال رمز التحقق').click();
   const dev = p.getByText(/رمز التطوير: \d{6}/);

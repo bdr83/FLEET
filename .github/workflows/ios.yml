@@ -1,0 +1,85 @@
+# تطبيق السائق على iOS: يبني ويرفع إلى TestFlight. يدوي فقط (دقائق macOS مكلفة في المستودعات الخاصة).
+# الأسرار (Settings → Secrets and variables → Actions):
+#   APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_KEY_P8 (محتوى ملف ‎.p8 كما هو، من App Store Connect → Users and Access → Integrations, دور Admin)
+#   APPLE_TEAM_ID (من developer.apple.com → Membership)
+# قبل أول رفع: أنشئ التطبيق في App Store Connect بمعرّف الحزمة com.q8hub.driver.
+name: ios
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to TestFlight (needs the App Store Connect secrets)'
+        type: boolean
+        default: true
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/driver
+    env:
+      API_URL: ${{ vars.DRIVER_API_URL || 'https://api.q8hub.com' }}
+      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+      KEY_P8: ${{ secrets.APPSTORE_KEY_P8 }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, flutter-version: '3.50.1', cache: true }
+      - run: flutter pub get
+      - run: flutter test
+      - name: Check secrets
+        if: inputs.upload
+        run: |
+          for k in KEY_ID ISSUER_ID KEY_P8 TEAM_ID; do [ -n "${!k}" ] || { echo "missing secret for $k (see the top of ios.yml)"; exit 1; }; done
+      - name: Build (no signing)
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }} --dart-define=API_URL=$API_URL
+      - name: App Store Connect key
+        if: inputs.upload
+        run: |
+          mkdir -p ~/private_keys
+          f=~/private_keys/AuthKey_$KEY_ID.p8
+          # يقبل المفتاح كما هو أو ملصوقًا في سطر واحد
+          python3 - "$f" <<'PY'
+          import os, re, sys
+          k = os.environ['KEY_P8'].replace('\r', '').replace('\\n', '\n').strip()
+          body = re.sub(r'-----(BEGIN|END) PRIVATE KEY-----', '', k)
+          body = re.sub(r'\s+', '', body)
+          if not body: sys.exit('APPSTORE_KEY_P8 is empty')
+          lines = [body[i:i+64] for i in range(0, len(body), 64)]
+          open(sys.argv[1], 'w').write('-----BEGIN PRIVATE KEY-----\n' + '\n'.join(lines) + '\n-----END PRIVATE KEY-----\n')
+          PY
+          openssl pkey -in "$f" -noout || { echo "APPSTORE_KEY_P8 is not a valid .p8 key"; exit 1; }
+      - name: Archive (automatic signing)
+        if: inputs.upload
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive -destination 'generic/platform=iOS' archive \
+            DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_STYLE=Automatic \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_$KEY_ID.p8 -authenticationKeyID $KEY_ID -authenticationKeyIssuerID $ISSUER_ID \
+            | tail -40
+          test -d $RUNNER_TEMP/Runner.xcarchive
+      - name: Upload to TestFlight
+        if: inputs.upload
+        run: |
+          cat > $RUNNER_TEMP/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/Runner.xcarchive -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/export -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_$KEY_ID.p8 -authenticationKeyID $KEY_ID -authenticationKeyIssuerID $ISSUER_ID
+          echo "uploaded build ${{ github.run_number }}; it appears in TestFlight after Apple finishes processing (usually 10-30 min)"
+      - name: Remove key
+        if: always()
+        run: rm -rf ~/private_keys

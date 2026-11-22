@@ -4,7 +4,8 @@ import type { PoolClient } from 'pg';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { normalizePhone } from '../common/phone';
-import { hashPassword, normalizeEmail, passwordProblem } from '../auth/password';
+import { normalizeEmail } from '../auth/password';
+import { ensureEmailLogin } from '../auth/email-account';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 import { isUuid } from '../auth/tokens';
@@ -48,11 +49,7 @@ export class MembersController {
     const email = !phone && body?.email ? normalizeEmail(body.email) : null;
     if (body?.phone && !phone) throw new BadRequestException('invalid phone');
     if (!phone && !email) throw new BadRequestException(body?.email ? 'invalid email' : 'phone or email required');
-    if (body?.password !== undefined) {
-      if (!email) throw new BadRequestException('password is only for email accounts');
-      const p = passwordProblem(body.password); if (p) throw new BadRequestException(p);
-    }
-    const pwHash = email && body?.password ? await hashPassword(body.password) : null;
+    if (body?.password !== undefined && !email) throw new BadRequestException('password is only for email accounts');
     return this.db.withTenant(a, async (c) => {
       const role = await this.resolveRole(c, a, body.role_code);
       let scope = await this.validateScope(c, body);
@@ -73,12 +70,7 @@ export class MembersController {
           `INSERT INTO org.app_user (id, phone, display_name) VALUES ($1,$2,$3)
            ON CONFLICT (phone) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name) RETURNING id`,
           [randomUUID(), phone, body.display_name ?? null])
-        : await c.query(
-          `INSERT INTO org.app_user (id, email, display_name, password_hash, password_changed_at) VALUES ($1,$2,$3,$4, CASE WHEN $4::text IS NULL THEN NULL ELSE now() END)
-           ON CONFLICT (email) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name),
-             password_hash = COALESCE(org.app_user.password_hash, EXCLUDED.password_hash),
-             password_changed_at = COALESCE(org.app_user.password_changed_at, EXCLUDED.password_changed_at) RETURNING id`,
-          [randomUUID(), email, body.display_name ?? null, pwHash]);
+        : { rows: [{ id: await ensureEmailLogin(c, null, email, body.password, body.display_name ?? null) }] };
       const id = randomUUID();
       try {
         await c.query(

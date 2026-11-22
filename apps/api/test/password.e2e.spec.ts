@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { auth, createApp, hasDb, onboard } from './helpers';
+import { auth, createApp, hasDb, newPhone, onboard } from './helpers';
 
 const d = hasDb ? describe : describe.skip;
 const email = (p: string) => `${p}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
@@ -70,5 +70,22 @@ d('email + password login', () => {
     const o2 = await onboard(app, 'شركة ثانية');
     await http().post('/v1/members').set(auth(o2.access_token)).send({ email: e, password: 'hijack attempt', role_code: 'dispatcher' }).expect(201);
     await http().post('/v1/auth/login').send({ email: e, password: 'hijack attempt', role_code: 'dispatcher' }).expect(401);
+  });
+
+  it('a driver added with an email logs in to the driver app with a password', async () => {
+    const o = await onboard(app, 'شركة السائقين');
+    const e = email('driver');
+    await http().post('/v1/workers').set(auth(o.access_token))
+      .send({ legal_entity_id: o.legal_entity_id, kind: 'driver', display_name: 'سائق بالبريد', email: e }).expect(400);
+    const w = await http().post('/v1/workers').set(auth(o.access_token))
+      .send({ legal_entity_id: o.legal_entity_id, kind: 'driver', display_name: 'سائق بالبريد', phone: newPhone(), email: e, password: 'driver pass 1' }).expect(201);
+    expect(w.body.user_id).toBeTruthy();
+    const li = await http().post('/v1/auth/login').send({ email: e, password: 'driver pass 1' }).expect(200);
+    expect(li.body.memberships).toEqual([expect.objectContaining({ tenant_id: o.tenant.id, role_code: 'driver' })]);
+    const s = await http().post('/v1/auth/token').set(auth(li.body.user_token)).send({ tenant_id: o.tenant.id }).expect(200);
+    await http().get('/v1/driver/me').set(auth(s.body.access_token)).expect(200);
+    // the same email cannot be attached to a different phone
+    await http().post('/v1/workers').set(auth(o.access_token))
+      .send({ legal_entity_id: o.legal_entity_id, kind: 'driver', display_name: 'آخر', phone: newPhone(), email: e }).expect(409);
   });
 });

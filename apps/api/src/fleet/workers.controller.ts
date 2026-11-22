@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { DbService } from '../db/db.service';
 import { audit } from '../common/audit';
 import { normalizePhone } from '../common/phone';
+import { ensureEmailLogin } from '../auth/email-account';
 import { pgToHttp, v } from '../common/validate';
 import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
@@ -14,7 +15,8 @@ const COLS = `w.id, w.legal_entity_id, w.branch_id, w.kind, w.display_name, w.ph
 
 /**
  * Drivers and other field staff. Adding a worker with a phone also gives them a
- * "driver" membership so they can log in to the driver app with OTP (unless they
+ * "driver" membership so they can log in to the driver app with OTP; adding an email
+ * (with a first password) lets them log in with email + password instead (unless they
  * already belong to the company with another role).
  */
 @Controller('v1/workers')
@@ -54,6 +56,8 @@ export class WorkersController {
     const employer = v.uuid(b?.employer_party_id, 'employer_party_id');
     const phone = b?.phone === undefined ? null : normalizePhone(b.phone);
     if (b?.phone !== undefined && !phone) throw new BadRequestException('invalid phone');
+    const email = b?.email === undefined || b?.email === '' ? null : b.email;
+    if (b?.password !== undefined && !email) throw new BadRequestException('password is only for an email login');
     return this.db.withTenant(a, async (c) => {
       let userId: string | null = null;
       if (phone) {
@@ -61,6 +65,9 @@ export class WorkersController {
           `INSERT INTO org.app_user (id, phone, display_name) VALUES ($1,$2,$3)
            ON CONFLICT (phone) DO UPDATE SET display_name = COALESCE(org.app_user.display_name, EXCLUDED.display_name) RETURNING id`,
           [randomUUID(), phone, name])).rows[0].id;
+      }
+      if (email) userId = await ensureEmailLogin(c, userId, email, b?.password, name);
+      if (userId) {
         await c.query(
           `INSERT INTO org.membership (id, tenant_id, user_id, role_id, scope_legal_entity_ids)
            VALUES ($1,$2,$3,$4,ARRAY[$5::uuid]) ON CONFLICT (tenant_id, user_id) WHERE revoked_at IS NULL DO NOTHING`,
