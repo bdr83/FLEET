@@ -1,0 +1,16 @@
+# HTTPS تلقائي (Let's Encrypt) للنطاقين. لوحة التحكم وصفحة التتبع العامة على APP_DOMAIN،
+# والخادم على API_DOMAIN لتطبيق السائق (والتحقق من الصحة على /health).
+{$APP_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy web:3001
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	request_body {
+		max_size 10MB
+	}
+	reverse_proxy api:3000
+}

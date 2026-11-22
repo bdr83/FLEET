@@ -1,0 +1,78 @@
+# تشغيل الإنتاج على خادم واحد: cp .env.example .env && (عدّل .env) && docker compose up -d
+# الصور تُبنى وتُنشر من GitHub Actions (ghcr.io/bdr83/fleet-*)؛ للتجربة المحلية: docker compose up -d --build
+name: fleet
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?set DB_ADMIN_PASSWORD}
+      POSTGRES_DB: fleet
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d fleet"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    shm_size: 256m
+
+  migrate:
+    image: ghcr.io/bdr83/fleet-migrate:${TAG:-latest}
+    build: ../db
+    restart: "no"
+    environment:
+      ADMIN_DATABASE_URL: postgresql://admin:${DB_ADMIN_PASSWORD}@db:5432/fleet
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    image: ghcr.io/bdr83/fleet-api:${TAG:-latest}
+    build: ../apps/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://app_rw:${APP_DB_PASSWORD}@db:5432/fleet
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET}
+      OTP_PEPPER: ${OTP_PEPPER:?set OTP_PEPPER}
+      LOCATION_RETENTION_DAYS: ${LOCATION_RETENTION_DAYS:-90}
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      SMS_PROVIDER: ${SMS_PROVIDER:-}
+      SMS_HTTP_URL: ${SMS_HTTP_URL:-}
+      SMS_HTTP_HEADERS: ${SMS_HTTP_HEADERS:-}
+      SMS_HTTP_BODY: ${SMS_HTTP_BODY:-}
+      SMS_HTTP_FORM: ${SMS_HTTP_FORM:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    image: ghcr.io/bdr83/fleet-web:${TAG:-latest}
+    build:
+      context: ../apps/web
+      args:
+        NEXT_PUBLIC_TILE_URL: ${TILE_URL:-}
+        NEXT_PUBLIC_TILE_ATTRIBUTION: ${TILE_ATTRIBUTION:-}
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3000
+    depends_on:
+      api: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, api]
+
+volumes:
+  db:
+  caddy_data:
+  caddy_config:
