@@ -14,7 +14,7 @@ import * as internal from '../sectors/internal/internal';
 import { vehicleBack, vehicleOut } from '../sectors/internal/internal.controller';
 import * as dist from '../sectors/distribution/distribution';
 import * as freight from '../sectors/freight/freight';
-import { parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
+import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
 const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES])];
@@ -313,7 +313,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -334,6 +334,8 @@ export class DriverController {
           received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 }), file_key: v.str(o.file_key, `ops[${i}].file_key`, { max: 300 }) };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
+      // a temperature reading on a cold-chain route (coldchain pack), typed by the driver from the truck's display
+      if (type === 'temp') return { ...base, type: 'temp' as const, reading_c: dist.celsius(o.reading_c, `ops[${i}].reading_c`), stop_task_id: v.uuid(o.stop_task_id, `ops[${i}].stop_task_id`) };
       if (type === 'ticket') {
         const poured = concrete.m3(o.poured_m3, `ops[${i}].poured_m3`, { required: true, max: 20, zero: true })!;
         const returned = concrete.m3(o.returned_m3, `ops[${i}].returned_m3`, { max: 20, zero: true }) ?? 0;
@@ -426,6 +428,23 @@ export class DriverController {
             [randomUUID(), a.tenantId, op.task_id, op.code, op.occurred_at, a.userId, op.client_op_id, op.lat, op.lng, op.note])) {
             results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           } else results.push({ client_op_id: op.client_op_id, result: 'duplicate' });
+          continue;
+        }
+
+        if (op.type === 'temp') {
+          if (!dist.isDistribution(t.sector_pack) || t.attributes?.kind !== 'route') { reject('not_supported'); continue; }
+          if (!['accepted', 'in_progress'].includes(t.status)) { reject('invalid_stage', t.status); continue; }
+          const route = (await c.query('SELECT id FROM ops.dist_route WHERE task_id = $1', [op.task_id])).rows[0];
+          await c.query('SAVEPOINT op');
+          try {
+            const bad = await addReading(c, a, { route: route.id, reading: op.reading_c, source: 'manual', device: null, at: op.occurred_at, stop: op.stop_task_id, note: op.note, clientOpId: op.client_op_id });
+            if (bad) { await c.query('ROLLBACK TO SAVEPOINT op'); reject(bad === 'unknown stop_task_id' ? 'unknown_stop' : bad, t.status); continue; }
+            results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
+          } catch (e) {
+            await c.query('ROLLBACK TO SAVEPOINT op');
+            if ((e as { code?: string }).code === '23505') { results.push({ client_op_id: op.client_op_id, result: 'duplicate' }); continue; }
+            throw e;
+          }
           continue;
         }
 
@@ -599,10 +618,11 @@ type SyncOp =
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
       weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
+  | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;

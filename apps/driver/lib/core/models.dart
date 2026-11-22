@@ -115,6 +115,11 @@ class DriverTask {
   String? get routeRef => attributes['route_ref'] as String?;
   int? get seq => attributes['seq'] is num ? (attributes['seq'] as num).toInt() : null;
   bool get payCash => attributes['payment'] == 'cash';
+  /// Cold chain (coldchain pack): chilled or frozen route or stop, with the range the readings are checked against.
+  String? get tempClass => attributes['temp_class'] as String?;
+  bool get isCold => tempClass != null && tempClass != 'ambient';
+  double? get tempMin => _num(attributes['temp_min']);
+  double? get tempMax => _num(attributes['temp_max']);
   int get stopsCount => attributes['stops'] is num ? (attributes['stops'] as num).toInt() : 0;
   List<DistItem> get distItems => [for (final i in (attributes['items'] as List? ?? const [])) if (i is Map) DistItem.fromJson(Map<String, dynamic>.from(i))];
   List<DistItem> get loadList => [for (final i in (attributes['load'] as List? ?? const [])) if (i is Map) DistItem.fromJson(Map<String, dynamic>.from(i))];
@@ -336,8 +341,9 @@ const distActionLabels = {
 
 /// A product line of a stop or of the load list.
 class DistItem {
-  DistItem({required this.sku, required this.name, required this.qty, this.price});
-  factory DistItem.fromJson(Map<String, dynamic> j) => DistItem(sku: j['sku'] as String, name: (j['name'] as String?) ?? j['sku'] as String, qty: _num(j['qty']) ?? 0, price: j['price'] as String?);
+  DistItem({required this.sku, required this.name, required this.qty, this.price, this.expiry});
+  factory DistItem.fromJson(Map<String, dynamic> j) => DistItem(sku: j['sku'] as String, name: (j['name'] as String?) ?? j['sku'] as String, qty: _num(j['qty']) ?? 0, price: j['price'] as String?, expiry: j['expiry'] as String?);
+  final String? expiry;
   final String sku;
   final String name;
   final double qty;
@@ -472,6 +478,9 @@ const distFailReasons = {
   'refused': 'رفض الاستلام',
   'no_cash': 'لا يوجد نقد',
   'no_space': 'لا مكان للتخزين',
+  'temp_out_of_range': 'رفض: الحرارة خارج النطاق',
+  'expired': 'رفض: منتهي الصلاحية',
+  'late_window': 'رفض: خارج نافذة التسليم',
   'other': 'سبب آخر',
 };
 
@@ -531,3 +540,16 @@ const rejectReasons = {
   'item_not_planned': 'صنف غير مخطط لهذا التوقف',
   'cash_required': 'أدخل المبلغ المحصّل',
 };
+
+const tempClassLabels = {'chilled': 'مبرد', 'frozen': 'مجمد', 'ambient': 'عادي'};
+
+/// A temperature typed by the driver: -50..60 °C, one decimal, Arabic digits and comma accepted.
+double? parseCelsius(String s) {
+  final t = s.trim().replaceAll('٫', '.').replaceAll(',', '.').replaceAll('−', '-').split('').map((c) {
+    final i = '٠١٢٣٤٥٦٧٨٩'.indexOf(c);
+    return i >= 0 ? '$i' : c;
+  }).join();
+  if (!RegExp(r'^-?\d{1,2}(\.\d)?$').hasMatch(t)) return null;
+  final n = double.parse(t);
+  return n < -50 || n > 60 ? null : n;
+}

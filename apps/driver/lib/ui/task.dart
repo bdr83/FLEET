@@ -81,6 +81,14 @@ class TaskScreen extends StatelessWidget {
             Text(t.status == 'accepted' && t.stage == null
                 ? 'راجع الحمولة على الشاحنة مع القائمة وسجّل العدّاد قبل الانطلاق.'
                 : t.status == 'in_progress' ? 'سلّم التوقفات بالترتيب، ثم سجّل العودة للمستودع بالعدّاد.' : 'انطلق عندما تكون جاهزًا.'),
+            if (t.isCold) ...[
+              const SizedBox(height: 8),
+              Row(children: [const Icon(Icons.ac_unit, size: 18), const SizedBox(width: 6), Text('${tempClassLabels[t.tempClass] ?? t.tempClass} · '),
+                Ltr('${t.tempMin?.toStringAsFixed(0) ?? ''}° .. ${t.tempMax?.toStringAsFixed(0) ?? ''}°')]),
+              if (['accepted', 'in_progress'].contains(t.status))
+                Padding(padding: const EdgeInsets.only(top: 6), child: OutlinedButton.icon(key: const Key('temp-reading'), icon: const Icon(Icons.thermostat),
+                    label: const Text('تسجيل الحرارة'), onPressed: () => _temp(context, t))),
+            ],
           ]))),
           const SizedBox(height: 12),
         ],
@@ -89,7 +97,7 @@ class TaskScreen extends StatelessWidget {
             Text('التوقف ${t.seq ?? ''} من المسار ${t.routeRef ?? ''}', style: text.labelMedium),
             Text(t.payCash ? 'الدفع نقدًا عند التسليم' : 'على الحساب (بلا تحصيل)', style: TextStyle(fontWeight: FontWeight.bold, color: t.payCash ? Theme.of(context).colorScheme.tertiary : null)),
             const SizedBox(height: 4),
-            for (final i in t.distItems) Row(children: [Expanded(child: Text(i.name)), Ltr(qtyText(i.qty))]),
+            for (final i in t.distItems) Row(children: [Expanded(child: Text(i.expiry != null ? '${i.name} · صلاحية ${i.expiry}' : i.name)), Ltr(qtyText(i.qty))]),
             if (t.status == 'assigned') const Padding(padding: EdgeInsets.only(top: 8), child: Text('يُفتح التسليم بعد الانطلاق من المستودع', style: TextStyle(fontWeight: FontWeight.bold))),
           ]))),
           const SizedBox(height: 12),
@@ -150,6 +158,32 @@ class TaskScreen extends StatelessWidget {
         _Actions(task: t),
       ]),
     );
+  }
+
+  /// Cold chain: the driver types the temperature shown on the truck's fridge display.
+  Future<void> _temp(BuildContext context, DriverTask t) async {
+    final s = AppScope.of(context);
+    final c = TextEditingController();
+    final v = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('حرارة الثلاجة', style: Theme.of(ctx).textTheme.titleLarge),
+          TextField(key: const Key('celsius'), controller: c, autofocus: true, textDirection: TextDirection.ltr,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'الحرارة (°C)'), onChanged: (_) => set(() {})),
+          const SizedBox(height: 12),
+          FilledButton(key: const Key('celsius-save'), onPressed: parseCelsius(c.text) == null ? null : () => Navigator.pop(ctx, parseCelsius(c.text)), child: const Text('تسجيل')),
+        ]),
+      )),
+    );
+    if (v == null || !context.mounted) return;
+    final err = await s.tempReading(t.id, v);
+    if (!context.mounted) return;
+    if (err != null) return toast(context, err, error: true);
+    final out = (t.tempMin != null && v < t.tempMin!) || (t.tempMax != null && v > t.tempMax!);
+    toast(context, out ? 'سُجّلت $v° وهي خارج النطاق: أبلغ المكتب' : 'سُجّلت $v°', error: out);
   }
 
   Future<void> _navigate(DriverTask t) async {

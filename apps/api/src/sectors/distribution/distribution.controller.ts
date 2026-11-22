@@ -7,12 +7,14 @@ import { DbService } from '../../db/db.service';
 import { audit } from '../../common/audit';
 import { pgToHttp, v } from '../../common/validate';
 import { createTask } from '../../tasks/tasks.controller';
-import { amount, checkDelivered, DISTRIBUTION, FAIL_REASONS, fils, Item, kwd, loadList, Qty, qty, qtyMap, reconcile, SKU, UNITS, valueFils } from './distribution';
+import { amount, celsius, checkDelivered, DISTRIBUTION, FAIL_REASONS, fils, inRange, Item, kwd, loadList, Qty, qty, qtyMap, reconcile, SKU, TEMP_CLASSES, TEMP_DEFAULTS, UNITS, valueFils } from './distribution';
 
 const ROUTE_SQL = `
   SELECT r.id, r.ref, r.legal_entity_id, r.route_date::text AS route_date, r.task_id, r.asset_id, a.plate_no, r.driver_worker_id, w.display_name AS driver_name,
          r.status, t.status AS task_status, r.notes, r.loaded_at, r.out_at, r.back_at, r.start_odometer_km, r.end_odometer_km,
          (r.end_odometer_km - r.start_odometer_km) AS km, r.cash_received::text, r.settled_at, r.settle_note, r.cancel_reason, r.version,
+         r.temp_class, r.temp_min::float, r.temp_max::float,
+         (SELECT jsonb_build_object('reading_c', x.reading_c::float, 'recorded_at', x.recorded_at, 'in_range', x.in_range) FROM ops.temp_reading x WHERE x.route_id = r.id ORDER BY x.recorded_at DESC LIMIT 1) AS last_reading,
          lower(t.service_window) AS window_from, upper(t.service_window) AS window_to,
          (SELECT count(*)::int FROM ops.dist_stop s WHERE s.route_id = r.id) AS stops,
          (SELECT count(*)::int FROM ops.dist_stop s WHERE s.route_id = r.id AND s.done_at IS NOT NULL) AS stops_done,
@@ -23,7 +25,7 @@ const ROUTE_SQL = `
     JOIN fleet.asset a ON a.id = r.asset_id JOIN workforce.worker w ON w.id = r.driver_worker_id`;
 const STOP_SQL = `
   SELECT s.task_id, s.route_id, s.seq, s.customer_id, s.name, s.payment, s.items, s.delivered, s.returned, s.cash_due::text, s.cash_collected::text,
-         s.received_by, s.closed_reason, s.done_at, t.status, t.attributes->>'address' AS address, t.attributes->'dropoff' AS dropoff
+         s.received_by, s.closed_reason, s.done_at, s.window_from, s.window_to, s.damaged, t.status, t.attributes->>'address' AS address, t.attributes->'dropoff' AS dropoff
     FROM ops.dist_stop s JOIN ops.task t ON t.id = s.task_id`;
 
 const version = (b: Record<string, unknown>) => v.int(b?.version, 'version', 1, 2_147_483_647) ?? (() => { throw new BadRequestException('version required'); })();
@@ -33,11 +35,11 @@ const hm = (x: unknown, f: string, d: string) => {
   return x;
 };
 
-interface StopIn { name: string; customer_id: string | null; address: string | null; phone: string | null; lat: number | null; lng: number | null; payment: 'cash' | 'credit'; items: { sku: string; qty: number; price?: string; name?: string }[] }
+interface StopIn { window_from: string | null; window_to: string | null; name: string; customer_id: string | null; address: string | null; phone: string | null; lat: number | null; lng: number | null; payment: 'cash' | 'credit'; items: { sku: string; qty: number; price?: string; name?: string; expiry?: string }[] }
 
 @Controller('v1/distribution')
 @UseGuards(AuthGuard)
-@Pack('distribution')
+@Pack('distribution', 'coldchain')
 export class DistributionController {
   constructor(private readonly db: DbService) {}
 
@@ -99,6 +101,12 @@ export class DistributionController {
     const start = hm(b?.start_time, 'start_time', '06:00'), end = hm(b?.end_time, 'end_time', '18:00');
     if (end <= start) throw new BadRequestException('end_time must be after start_time');
     const notes = v.str(b?.notes, 'notes', { max: 1000 });
+    const tempClass = v.oneOf(b?.temp_class, 'temp_class', TEMP_CLASSES) ?? 'ambient';
+    const def = TEMP_DEFAULTS[tempClass];
+    const tMin = b?.temp_min === undefined || b?.temp_min === null ? def?.[0] ?? null : celsius(b.temp_min, 'temp_min');
+    const tMax = b?.temp_max === undefined || b?.temp_max === null ? def?.[1] ?? null : celsius(b.temp_max, 'temp_max');
+    if (tMin !== null && tMax !== null && tMin > tMax) throw new BadRequestException('temp_min must not be above temp_max');
+    if ((tMin === null) !== (tMax === null)) throw new BadRequestException('send both temp_min and temp_max');
     if (!Array.isArray(b?.stops) || b.stops.length === 0 || b.stops.length > 200) throw new BadRequestException('stops must be a list of 1-200');
     const stops: StopIn[] = (b.stops as Record<string, unknown>[]).map((s, i) => {
       if (!s || typeof s !== 'object') throw new BadRequestException(`stops[${i}] invalid`);
@@ -106,7 +114,11 @@ export class DistributionController {
       const lat = s.lat === undefined || s.lat === null ? null : Number(s.lat), lng = s.lng === undefined || s.lng === null ? null : Number(s.lng);
       if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) || (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180))) throw new BadRequestException(`stops[${i}] lat/lng invalid`);
       const seen = new Set<string>();
+      const wf = s.window_from === undefined || s.window_from === null || s.window_from === '' ? null : hm(s.window_from, `stops[${i}].window_from`, '');
+      const wt = s.window_to === undefined || s.window_to === null || s.window_to === '' ? null : hm(s.window_to, `stops[${i}].window_to`, '');
+      if (wf && wt && wt <= wf) throw new BadRequestException(`stops[${i}]: window_to must be after window_from`);
       return {
+        window_from: wf, window_to: wt,
         name: v.str(s.name, `stops[${i}].name`, { required: true, max: 120 })!,
         customer_id: v.uuid(s.customer_id, `stops[${i}].customer_id`),
         address: v.str(s.address, `stops[${i}].address`, { max: 300 }),
@@ -119,7 +131,7 @@ export class DistributionController {
           if (seen.has(sku)) throw new BadRequestException(`stops[${i}]: ${sku} listed twice`);
           seen.add(sku);
           return { sku, qty: qty(it.qty, `stops[${i}].items[${j}].qty`), price: it.price === undefined ? undefined : amount(it.price, `stops[${i}].items[${j}].price`),
-            name: v.str(it.name, `stops[${i}].items[${j}].name`, { max: 120 }) ?? undefined };
+            name: v.str(it.name, `stops[${i}].items[${j}].name`, { max: 120 }) ?? undefined, expiry: v.date(it.expiry, `stops[${i}].items[${j}].expiry`) ?? undefined };
         }),
       };
     });
@@ -138,7 +150,7 @@ export class DistributionController {
         items: s.items.map((it): Item => {
           const p = catalogue.get(it.sku);
           if (!p && (it.name === undefined || it.price === undefined)) throw new BadRequestException(`stops[${i}]: ${it.sku} is not in the catalogue (send name and price)`);
-          return { sku: it.sku, name: it.name ?? p!.name, qty: it.qty, price: it.price ?? p!.price };
+          return { sku: it.sku, name: it.name ?? p!.name, qty: it.qty, price: it.price ?? p!.price, ...(it.expiry ? { expiry: it.expiry } : {}) };
         }),
       }));
       for (const [i, s] of planned.entries()) {
@@ -157,12 +169,14 @@ export class DistributionController {
       const load = loadList(planned);
       const window = { from: new Date(win.f).toISOString(), to: new Date(win.t).toISOString() };
       const routeTask = await createTask(c, a, { le, pack: DISTRIBUTION, branch: null, status: 'ready', customer: null, site: null, ref, win: window,
-        attrs: { kind: 'route', route_ref: ref, stops: planned.length, load, address: `${planned.length} توقفات` } });
+        attrs: { kind: 'route', route_ref: ref, stops: planned.length, load, address: `${planned.length} توقفات`,
+          ...(tempClass !== 'ambient' ? { temp_class: tempClass, temp_min: tMin, temp_max: tMax } : {}) } });
       const id = randomUUID();
       await c.query('SAVEPOINT r');
       try {
-        await c.query(`INSERT INTO ops.dist_route (id, tenant_id, legal_entity_id, ref, route_date, task_id, asset_id, driver_worker_id, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [id, a.tenantId, le, ref, day, routeTask.id, assetId, driverId, notes, a.userId]);
+        await c.query(`INSERT INTO ops.dist_route (id, tenant_id, legal_entity_id, ref, route_date, task_id, asset_id, driver_worker_id, notes, created_by, temp_class, temp_min, temp_max)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [id, a.tenantId, le, ref, day, routeTask.id, assetId, driverId, notes, a.userId, tempClass, tMin, tMax]);
         await c.query(`INSERT INTO ops.assignment (id, tenant_id, task_id, worker_id, asset_id, exclusive, period, assigned_by) VALUES ($1,$2,$3,$4,$5,true,tstzrange($6,$7),$8)`,
           [randomUUID(), a.tenantId, routeTask.id, driverId, assetId, window.from, window.to, a.userId]);
       } catch (e) {
@@ -176,10 +190,15 @@ export class DistributionController {
       for (const [i, s] of planned.entries()) {
         const seq = i + 1;
         const t = await createTask(c, a, { le, pack: DISTRIBUTION, branch: null, status: 'ready', customer: null, site: null, ref: `${ref}-${seq}`, win: window,
-          attrs: { kind: 'stop', seq, route_ref: ref, route_id: id, name: s.name, address: s.address ?? s.name, payment: s.payment, items: s.items,
+          attrs: { kind: 'stop', seq, route_ref: ref, route_id: id, name: s.name, address: s.address ?? s.name, payment: s.payment, items: s.items, ...(tempClass !== 'ambient' ? { temp_class: tempClass } : {}),
             dropoff: { name: s.name, ...(s.phone ? { phone: s.phone } : {}), ...(s.lat !== null && s.lng !== null ? { lat: s.lat, lng: s.lng } : {}) } } });
-        await c.query(`INSERT INTO ops.dist_stop (task_id, tenant_id, route_id, seq, customer_id, name, payment, items) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [t.id, a.tenantId, id, seq, s.customer_id, s.name, s.payment, JSON.stringify(s.items)]);
+        const sw = s.window_from || s.window_to ? (await c.query(
+          `SELECT CASE WHEN $2::time IS NULL THEN NULL ELSE ($1::date + $2::time) AT TIME ZONE le.timezone END AS f,
+                  CASE WHEN $3::time IS NULL THEN NULL ELSE ($1::date + $3::time) AT TIME ZONE le.timezone END AS t FROM org.legal_entity le WHERE le.id = $4`,
+          [day, s.window_from, s.window_to, le])).rows[0] : { f: null, t: null };
+        await c.query(`INSERT INTO ops.dist_stop (task_id, tenant_id, route_id, seq, customer_id, name, payment, items, window_from, window_to) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [t.id, a.tenantId, id, seq, s.customer_id, s.name, s.payment, JSON.stringify(s.items), sw.f, sw.t]);
+        if (sw.f || sw.t) await c.query(`UPDATE ops.task SET attributes = attributes || jsonb_build_object('window', $2::text) WHERE id = $1`, [t.id, [s.window_from, s.window_to].filter(Boolean).join('–')]);
         await c.query(`INSERT INTO ops.assignment (id, tenant_id, task_id, worker_id, exclusive, period, assigned_by) VALUES ($1,$2,$3,$4,false,tstzrange($5,$6),$7)`,
           [randomUUID(), a.tenantId, t.id, driverId, window.from, window.to, a.userId]);
         await this.status(c, a, t.id, 'ready', 'assigned', `stop ${seq} of ${ref}`);
@@ -261,6 +280,28 @@ export class DistributionController {
       if ('reject' in res) throw (res.reject === 'not_supported' ? new NotFoundException() : new ConflictException(res.reject));
       const route = (await c.query('SELECT route_id FROM ops.dist_stop WHERE task_id = $1', [taskId])).rows[0].route_id;
       return this.detail(c, route);
+    });
+  }
+
+  /**
+   * A temperature reading for a route (cold chain): entered by the office, or sent by a logger or another app (source
+   * device / external with its reference). Checked against the route's range.
+   */
+  @Post('routes/:id/temps')
+  @Perm('tasks:write')
+  addTemp(@Auth() a: AuthContext, @Param('id', new ParseUUIDPipe()) id: string, @Body() b: Record<string, unknown>) {
+    const reading = celsius(b?.reading_c, 'reading_c');
+    const source = v.oneOf(b?.source, 'source', ['manual', 'device', 'external'] as const) ?? 'manual';
+    const device = v.str(b?.device_ref, 'device_ref', { max: 80 });
+    if (source !== 'manual' && !device) throw new BadRequestException('device_ref required for a device or external reading');
+    const at = v.ts(b?.recorded_at, 'recorded_at') ?? new Date();
+    if (at.getTime() > Date.now() + 5 * 60_000) throw new BadRequestException('recorded_at is in the future');
+    const stop = v.uuid(b?.stop_task_id, 'stop_task_id');
+    const note = v.str(b?.note, 'note', { max: 300 });
+    return this.db.withTenant(a, async (c) => {
+      const res = await addReading(c, a, { route: id, reading, source, device, at, stop, note, clientOpId: randomUUID() });
+      if (res) throw (res === 'not_supported' ? new NotFoundException() : new BadRequestException(res));
+      return this.detail(c, id);
     });
   }
 
@@ -346,7 +387,9 @@ export class DistributionController {
     const r = (await c.query(`${ROUTE_SQL} WHERE r.id = $1`, [id])).rows[0];
     if (!r) throw new NotFoundException();
     const stops = (await c.query(`${STOP_SQL} WHERE s.route_id = $1 ORDER BY s.seq`, [id])).rows;
-    return { ...r, stops, load: loadList(stops), reconcile: reconcile(stops),
+    const temps = (await c.query(
+      `SELECT id, stop_task_id, reading_c::float, source, device_ref, in_range, recorded_at, note FROM ops.temp_reading WHERE route_id = $1 ORDER BY recorded_at`, [id])).rows;
+    return { ...r, stops, temps, load: loadList(stops), reconcile: reconcile(stops),
       variance: r.cash_received === null ? null : kwd(fils(r.cash_received) - fils(r.cash_collected)) };
   }
 
@@ -369,7 +412,7 @@ export class DistributionController {
   }
 }
 
-export interface ProofIn { delivered: Qty; returned: Qty; cash_collected: string | null; received_by: string | null; closed_reason: string | null; note: string | null }
+export interface ProofIn { delivered: Qty; returned: Qty; damaged: Qty; cash_collected: string | null; received_by: string | null; closed_reason: string | null; note: string | null }
 
 /** The stop proof as the app or the office sends it. A closed stop carries a reason and no quantities. */
 export function parseProof(o: Record<string, unknown>, f: string): ProofIn {
@@ -377,7 +420,7 @@ export function parseProof(o: Record<string, unknown>, f: string): ProofIn {
   const delivered = qtyMap(o?.delivered, `${f}.delivered`);
   if (!closed && Object.keys(delivered).length === 0) throw new BadRequestException(`${f}: send delivered quantities, or closed_reason`);
   return {
-    delivered, returned: qtyMap(o?.returned, `${f}.returned`),
+    delivered, returned: qtyMap(o?.returned, `${f}.returned`), damaged: qtyMap(o?.damaged, `${f}.damaged`),
     cash_collected: o?.cash_collected === undefined || o?.cash_collected === null ? null : amount(o.cash_collected, `${f}.cash_collected`),
     received_by: v.str(o?.received_by, `${f}.received_by`, { max: 120 }), closed_reason: closed, note: v.str(o?.note, `${f}.note`, { max: 500 }),
   };
@@ -405,9 +448,9 @@ export async function stopProof(c: PoolClient, a: AuthContext, taskId: string, p
   }
   const collected = p.closed_reason ? 0 : fils(p.cash_collected ?? '0');
   const to = p.closed_reason ? 'failed' : 'completed';
-  await c.query(`UPDATE ops.dist_stop SET delivered = $2, returned = $3, cash_due = $4, cash_collected = $5, received_by = $6, closed_reason = $7, done_at = $8, client_op_id = $9 WHERE task_id = $1`,
+  await c.query(`UPDATE ops.dist_stop SET delivered = $2, returned = $3, cash_due = $4, cash_collected = $5, received_by = $6, closed_reason = $7, done_at = $8, client_op_id = $9, damaged = $10 WHERE task_id = $1`,
     [taskId, p.closed_reason ? null : JSON.stringify(p.delivered), Object.keys(p.returned).length ? JSON.stringify(p.returned) : null, kwd(due), kwd(collected),
-     p.received_by, p.closed_reason, at.toISOString(), clientOpId]);
+     p.received_by, p.closed_reason, at.toISOString(), clientOpId, Object.keys(p.damaged ?? {}).length ? JSON.stringify(p.damaged) : null]);
   await c.query('UPDATE ops.task SET status = $2, version = version + 1, updated_at = now() WHERE id = $1', [taskId, to]);
   await c.query(
     `INSERT INTO ops.task_event (id, tenant_id, task_id, from_status, to_status, occurred_at, actor_id, actor_type, client_op_id, note, reason_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
@@ -445,4 +488,18 @@ export async function routeOut(c: PoolClient, a: AuthContext, taskId: string, at
       `INSERT INTO ops.task_event (id, tenant_id, task_id, from_status, to_status, occurred_at, actor_id, actor_type, client_op_id, note) VALUES ($1,$2,$3,'assigned','accepted',$4,$5,'system',$6,'route left the depot')`,
       [randomUUID(), a.tenantId, s.task_id, at.toISOString(), a.userId, randomUUID()]);
   }
+}
+
+/** Records a temperature reading on a route (driver app or office). Returns a rejection reason, or null when stored. */
+export async function addReading(c: PoolClient, a: AuthContext, r: { route: string; reading: number; source: string; device: string | null; at: Date; stop: string | null; note: string | null; clientOpId: string })
+  : Promise<string | null> {
+  const route = (await c.query('SELECT id, status, temp_min::float, temp_max::float FROM ops.dist_route WHERE id = $1', [r.route])).rows[0];
+  if (!route) return 'not_supported';
+  if (route.status === 'canceled') return 'route_canceled';
+  if (r.stop && !(await c.query('SELECT 1 FROM ops.dist_stop WHERE task_id = $1 AND route_id = $2', [r.stop, r.route])).rowCount) return 'unknown stop_task_id';
+  await c.query(
+    `INSERT INTO ops.temp_reading (id, tenant_id, route_id, stop_task_id, reading_c, source, device_ref, in_range, recorded_at, recorded_by, note, client_op_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [randomUUID(), a.tenantId, r.route, r.stop, r.reading, r.source, r.device, inRange(r.reading, route.temp_min, route.temp_max), r.at.toISOString(), a.userId, r.note, r.clientOpId]);
+  return null;
 }

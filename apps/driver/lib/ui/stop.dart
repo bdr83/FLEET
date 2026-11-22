@@ -14,13 +14,14 @@ class StopScreen extends StatefulWidget {
 class _StopScreenState extends State<StopScreen> {
   final _delivered = <String, TextEditingController>{};
   final _returned = <String, TextEditingController>{};
+  final _damaged = <String, TextEditingController>{};
   final _cash = TextEditingController();
   final _receiver = TextEditingController();
   bool _busy = false;
 
   @override
   void dispose() {
-    for (final c in [..._delivered.values, ..._returned.values, _cash, _receiver]) {
+    for (final c in [..._delivered.values, ..._returned.values, ..._damaged.values, _cash, _receiver]) {
       c.dispose();
     }
     super.dispose();
@@ -47,6 +48,7 @@ class _StopScreenState extends State<StopScreen> {
     for (final i in items) {
       _delivered.putIfAbsent(i.sku, () => TextEditingController(text: qtyText(i.qty)));
       _returned.putIfAbsent(i.sku, () => TextEditingController());
+      _damaged.putIfAbsent(i.sku, () => TextEditingController());
     }
     final delivered = _read(_delivered);
     final due = delivered == null ? null : distValueFils(items, delivered);
@@ -57,12 +59,17 @@ class _StopScreenState extends State<StopScreen> {
         Text('الكمية المسلَّمة لكل صنف (عدّلها إن استلم الفرع أقل)', style: text.labelMedium),
         for (final i in items)
           Padding(padding: const EdgeInsets.only(top: 8), child: Row(children: [
-            Expanded(child: Text('${i.name} (المخطط ${qtyText(i.qty)})')),
+            Expanded(child: Text('${i.name} (المخطط ${qtyText(i.qty)})${i.expiry != null ? '\nصلاحية ${i.expiry}' : ''}')),
             SizedBox(width: 90, child: TextField(key: Key('delivered-${i.sku}'), controller: _delivered[i.sku], textDirection: TextDirection.ltr,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'سُلّم ${i.name}', isDense: true), onChanged: (_) => setState(() {}))),
             const SizedBox(width: 8),
             SizedBox(width: 90, child: TextField(key: Key('returned-${i.sku}'), controller: _returned[i.sku], textDirection: TextDirection.ltr,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'مرتجع ${i.name}', isDense: true))),
+            if (t.isCold) ...[
+              const SizedBox(width: 8),
+              SizedBox(width: 90, child: TextField(key: Key('damaged-${i.sku}'), controller: _damaged[i.sku], textDirection: TextDirection.ltr,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'تالف ${i.name}', isDense: true))),
+            ],
           ])),
         const SizedBox(height: 16),
         if (t.payCash) ...[
@@ -85,8 +92,8 @@ class _StopScreenState extends State<StopScreen> {
   }
 
   Future<void> _save(BuildContext context, DriverTask t) async {
-    final delivered = _read(_delivered), returned = _read(_returned);
-    if (delivered == null || returned == null) return toast(context, 'كمية غير صحيحة', error: true);
+    final delivered = _read(_delivered), returned = _read(_returned), damaged = _read(_damaged);
+    if (delivered == null || returned == null || damaged == null) return toast(context, 'كمية غير صحيحة', error: true);
     if (delivered.isEmpty) return toast(context, 'لم يُسلَّم شيء: استخدم «تعذّر التسليم» بدلًا من ذلك', error: true);
     String? cash;
     if (t.payCash) {
@@ -96,7 +103,7 @@ class _StopScreenState extends State<StopScreen> {
     }
     setState(() => _busy = true);
     final s = AppScope.of(context);
-    final err = await s.stopProof(t.id, delivered: delivered, returned: returned, cash: cash, receivedBy: _receiver.text.trim().isEmpty ? null : _receiver.text.trim());
+    final err = await s.stopProof(t.id, delivered: delivered, returned: returned, damaged: damaged, cash: cash, receivedBy: _receiver.text.trim().isEmpty ? null : _receiver.text.trim());
     if (!context.mounted) return;
     setState(() => _busy = false);
     if (err != null) return toast(context, err, error: true);

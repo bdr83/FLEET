@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -337,3 +337,17 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /v1/freight/exceptions` | بلا تخطيط خلال 24 ساعة، متأخرة، انتظار بعد الوقت المجاني، اختلاف وزن |
 
 تطبيق السائق: المراحل `at_pickup` → `loaded` (مع `weight_kg` و`seal_no` اختياريين) → بدء الرحلة → `at_dropoff` → `unloaded` (يلزم `received_by`، و`weight_kg` اختياري). البدء يحتاج `loaded` والإكمال يحتاج `unloaded`. عند الإكمال تُكتب الكميات: `trip: 1` أو `km` المخطط أو `ton` من الوزن المسلَّم، و`hour` للانتظار بعد الوقت المجاني عند كل طرف بربع الساعة. أسباب التعثر: truck_breakdown، refused_by_consignee، weight_mismatch، cargo_damaged، address_not_found، cargo_not_ready، customer_canceled، other.
+
+## قطاع التوزيع الغذائي والتبريد coldchain (القطاع 3)
+
+يبني على مسارات التوزيع (`distribution@1`): النشاط `coldchain` يفتح «التوزيع اليومي» و«سلسلة التبريد» حتى بدون نشاط التوزيع. المسار يحمل فئة الحرارة ونطاقها، والتوقف نافذة تسليم، والصنف تاريخ صلاحية.
+
+| المسار | الوصف |
+|---|---|
+| `POST /v1/distribution/routes` | حقول إضافية: `temp_class` (`ambient`، `chilled`، `frozen`)، `temp_min` و`temp_max` (الافتراضي مبرد 0° إلى 5° ومجمد -25° إلى -18° [تخمين])؛ التوقف `window_from` و`window_to` بصيغة HH:MM بتوقيت الكيان؛ الصنف `expiry` |
+| `POST /v1/distribution/routes/:id/temps` | قراءة حرارة `{reading_c, source: manual\|device\|external, device_ref, recorded_at?, stop_task_id?, note?}`؛ رقم الجهاز مطلوب لغير اليدوي. القراءات لا تُعدَّل ولا تُحذف |
+| `POST /v1/driver/sync` op `temp` | `{task_id: مهمة المسار, reading_c, stop_task_id?}` بعد قبول المسار؛ op `stop` يقبل `damaged: {sku: qty}` |
+| `GET /v1/coldchain/exceptions` | قراءات خارج النطاق (7 أيام)، مسارات مبردة على الطريق بلا قراءة منذ 90 دقيقة [تخمين]، تسليمات خارج النافذة، أصناف تنتهي صلاحيتها في يوم المسار أو قبله، وتالف عند التسليم |
+| `GET /v1/coldchain/report?from&to` | لكل مسار وإجمالي: الالتزام بالنافذة، قيمة المسلَّم والتالف والمرتجع، نسبة التلف = تالف ÷ (مسلَّم + تالف)، نسبة المرتجعات، توقفات في الساعة، ونسبة القراءات ضمن النطاق |
+
+أسباب تعذر إضافية: `temp_out_of_range`، `expired`، `late_window`.

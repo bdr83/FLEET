@@ -5,7 +5,7 @@ export interface Me {
   user_id: string; phone: string | null; email?: string | null; display_name: string | null;
   tenant_id: string; tenant_name: string | null; tenant_status: string | null;
   role: string; permissions: string[];
-  /** Sector packs the company turned on (delivery, freight, staffing, concrete, internal, distribution). */
+  /** Sector packs the company turned on (delivery, freight, coldchain, staffing, concrete, internal, distribution). */
   packs?: string[];
   scope: { legal_entity_ids: string[]; branch_ids: string[] };
   legal_entities: { id: string; name: string; country: string; currency: string; timezone: string }[];
@@ -17,7 +17,7 @@ export function useMe(): Me {
   return me;
 }
 export function hasPack(me: Me, pack: string) {
-  return !me.packs || me.packs.includes(pack);
+  return !me.packs || pack.split('|').some((p) => me.packs!.includes(p));
 }
 export function can(me: Me, perm: string) {
   return me.permissions.includes('*') || me.permissions.includes(perm);
