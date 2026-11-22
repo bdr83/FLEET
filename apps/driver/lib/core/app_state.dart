@@ -187,6 +187,26 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'milestone', 'code': code, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
   }
 
+  /// Driver supply: checking in accepts the day-shift if needed, records the check-in with the position (the office sees
+  /// how far from the site it was) and starts the shift. Queued in order, so it works offline too.
+  Future<void> checkIn(String taskId) async {
+    final t = task(taskId);
+    if (t == null) return;
+    final p = await tracker.current();
+    _local(taskId, (x) => x.copyWith(status: 'in_progress', stage: 'check_in'));
+    if (t.status == 'assigned') await _syncOp(taskId, {'type': 'task_status', 'to_status': 'accepted'});
+    await _syncOp(taskId, {'type': 'milestone', 'code': 'check_in', if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'in_progress'});
+  }
+
+  /// Checking out ends the shift: the server computes the worked hours from check-in to check-out.
+  Future<void> checkOut(String taskId) async {
+    final p = await tracker.current();
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'check_out'));
+    await _syncOp(taskId, {'type': 'milestone', 'code': 'check_out', if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude});
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+  }
+
   /// Checks the recipient's PIN with the server when online (so a wrong PIN is known at once).
   /// Offline it is queued and checked when the phone reconnects. Returns null when accepted or queued.
   Future<String?> provePin(String taskId, String pin) async {

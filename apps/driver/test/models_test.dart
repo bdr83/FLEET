@@ -96,4 +96,34 @@ void main() {
       expect(ticketError(9, 9, 0, ' '), isNotNull);
     });
   });
+
+  group('driver supply shifts', () {
+    DriverTask shift(String status, {String? stage, DateTime? from}) => DriverTask(
+        id: 's', status: status, sectorPack: 'staffing@1', version: 1, stage: stage, windowFrom: from,
+        attributes: {'shift': '08:00–17:00', 'work_date': '2026-11-22', 'request_ref': 'SR-1', 'address': 'مستودع الري، الري، ق 1',
+          'dropoff': {'name': 'مستودع الري', 'area': 'الري', 'lat': 29.3, 'lng': 47.93, 'contact_name': 'أبو محمد', 'contact_phone': '+96550000011'}});
+    test('one tap to check in, one to check out', () {
+      expect(nextActions(shift('assigned')), [TaskAction.checkIn]);
+      expect(nextActions(shift('accepted')), [TaskAction.checkIn]);
+      expect(nextActions(shift('in_progress', stage: 'check_in')), [TaskAction.checkOut, TaskAction.fail]);
+      expect(nextActions(shift('in_progress', stage: 'check_out')), [TaskAction.complete]);
+      expect(nextActions(shift('completed')), isEmpty);
+      expect(actionLabel(shift('assigned'), TaskAction.checkIn), 'تسجيل الحضور');
+      // check-in opens two hours before the shift
+      final at = DateTime.utc(2026, 11, 23, 5);
+      expect(nextActions(shift('assigned', from: at), now: at.subtract(const Duration(hours: 3))), isEmpty);
+      expect(nextActions(shift('assigned', from: at), now: at.subtract(const Duration(minutes: 90))), [TaskAction.checkIn]);
+      expect(actionLabel(shift('in_progress'), TaskAction.checkOut), 'تسجيل الانصراف');
+    });
+    test('shift details, site and reasons', () {
+      final t = shift('assigned');
+      expect(t.isStaffing, isTrue);
+      expect(t.shift, '08:00–17:00');
+      expect(t.address, 'مستودع الري، الري، ق 1');
+      expect(t.siteContact, 'أبو محمد');
+      expect(t.target, (lat: 29.3, lng: 47.93));
+      expect(failReasonsFor(t), staffingFailReasons);
+      expect(stageLabels['check_in'], isNotNull);
+    });
+  });
 }

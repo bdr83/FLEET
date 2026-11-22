@@ -88,6 +88,11 @@ class DriverTask {
   bool get isDelivery => sectorPack == 'delivery@1';
   /// A concrete load planned from a pour order (it has a ticket). A bare concrete@1 task keeps the simple flow.
   bool get isConcrete => sectorPack == 'concrete@1' && ticket != null;
+  /// A day-shift of a driver placed with a customer (driver supply): check in at the site, check out at the end.
+  bool get isStaffing => sectorPack == 'staffing@1';
+  String? get shift => attributes['shift'] as String?;
+  String? get workDate => attributes['work_date'] as String?;
+  String? get requestRef => attributes['request_ref'] as String?;
   String? get ticketNo => ticket?['ticket_no'] as String? ?? attributes['ticket_no'] as String?;
   double get volumeM3 => _num(ticket?['volume_m3']) ?? _num(attributes['volume_m3']) ?? 0;
   String? get mixCode => ticket?['mix_code'] as String? ?? attributes['mix_code'] as String?;
@@ -100,7 +105,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -166,10 +171,11 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket }
+enum TaskAction { accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut }
 
-List<TaskAction> nextActions(DriverTask t) {
+List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
+  if (t.isStaffing) return _staffingActions(t, now ?? DateTime.now());
   switch (t.status) {
     case 'assigned':
       return [TaskAction.accept];
@@ -210,9 +216,33 @@ List<TaskAction> _concreteActions(DriverTask t) {
   }
 }
 
+/// Same rule as the server: check-in opens two hours before the shift starts.
+const earlyCheckIn = Duration(hours: 2);
+bool checkInOpen(DriverTask t, DateTime now) => t.windowFrom == null || !now.isBefore(t.windowFrom!.subtract(earlyCheckIn));
+
+/// Driver supply day-shift: one tap to check in at the customer's site (accepts and starts the shift), one to check out.
+List<TaskAction> _staffingActions(DriverTask t, DateTime now) {
+  switch (t.status) {
+    case 'assigned':
+    case 'accepted':
+      return checkInOpen(t, now) ? [TaskAction.checkIn] : [];
+    case 'in_progress':
+      return t.stage == 'check_out' ? [TaskAction.complete] : [TaskAction.checkOut, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
 /// The button text, worded for the kind of task.
 String actionLabel(DriverTask t, TaskAction a) =>
-    t.isConcrete ? (concreteActionLabels[a] ?? actionLabels[a]!) : actionLabels[a]!;
+    t.isConcrete ? (concreteActionLabels[a] ?? actionLabels[a]!) : t.isStaffing ? (staffingActionLabels[a] ?? actionLabels[a]!) : actionLabels[a]!;
+
+const staffingActionLabels = {
+  TaskAction.checkIn: 'تسجيل الحضور',
+  TaskAction.checkOut: 'تسجيل الانصراف',
+  TaskAction.complete: 'إنهاء المناوبة',
+  TaskAction.fail: 'مغادرة قبل نهاية الدوام',
+};
 
 const concreteActionLabels = {
   TaskAction.accept: 'قبول الحمولة',
@@ -255,7 +285,20 @@ const stageLabels = {
   'at_site': 'في الموقع',
   'pour_start': 'جارٍ الصب',
   'pour_end': 'انتهى الصب',
+  'check_in': 'سجّل الحضور',
+  'check_out': 'سجّل الانصراف',
 };
+
+/// Same codes as the API (staffing FAIL_REASONS).
+const staffingFailReasons = {
+  'sick': 'مرض',
+  'vehicle_breakdown': 'عطل في المركبة',
+  'sent_home_by_customer': 'صرفني العميل',
+  'other': 'سبب آخر',
+};
+
+/// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
+Map<String, String>? failReasonsFor(DriverTask t) => t.isConcrete ? concreteFailReasons : t.isStaffing ? staffingFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (concrete FAIL_REASONS).
 const concreteFailReasons = {
@@ -298,4 +341,5 @@ const rejectReasons = {
   'already_signed': 'التذكرة موقّعة مسبقًا',
   'quantity_exceeds_load': 'المصبوب والمرتجع أكثر من حمولة الخلاطة',
   'invalid_reason': 'سبب غير مناسب لهذا النوع من المهام',
+  'too_early': 'يفتح تسجيل الحضور قبل بداية الدوام بساعتين',
 };

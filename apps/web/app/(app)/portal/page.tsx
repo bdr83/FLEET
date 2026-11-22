@@ -1,8 +1,8 @@
 'use client';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import { dt, PACKS, packLabel, taskSummary, todayKw } from '@/lib/format';
-import { Empty, ErrorBox, Modal, StatusBadge, useAction, useForm, useLoad } from '@/components/ui';
+import { day, dt, hours, PACKS, packLabel, REQUEST_STATE, siteLine, ConcreteSite, taskSummary, time, todayKw, workDaysLine } from '@/lib/format';
+import { Badge, Empty, ErrorBox, Modal, StatusBadge, Tone, useAction, useForm, useLoad } from '@/components/ui';
 
 interface PortalTask { id: string; ref: string | null; status: string; sector_pack: string; window_from: string | null; window_to: string | null; attributes: Record<string, unknown>; driver_name: string | null; plate_no: string | null }
 interface PortalMe { name: string; sites: { id: string; name: string; address: string | null }[] }
@@ -34,6 +34,7 @@ export default function Portal() {
           ))}</tbody>
         </table></div>
       )}
+      <StaffingSection />
       {creating && <NewRequest sites={me.data?.sites ?? []} onClose={() => setCreating(false)} onDone={() => { setCreating(false); void tasks.reload(); }} />}
     </div>
   );
@@ -56,7 +57,7 @@ function NewRequest({ sites, onClose, onDone }: { sites: PortalMe['sites']; onCl
       <form className="form" onSubmit={submit}>
         <ErrorBox error={error} />
         <div className="form-2">
-          <label className="field">النوع<select {...bind('sector_pack')}>{Object.entries(PACKS).filter(([k]) => k !== 'internal@1').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          <label className="field">النوع<select {...bind('sector_pack')}>{Object.entries(PACKS).filter(([k]) => k !== 'internal@1' && k !== 'staffing@1').map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
           {sites.length > 0 && <label className="field">موقع الاستلام<select {...bind('site_id')}><option value="">—</option>{sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>}
           <label className="field">مرجعكم<input {...bind('ref')} maxLength={60} /></label>
           <label className="field">من<input {...bind('from')} type="datetime-local" required /></label>
@@ -68,6 +69,76 @@ function NewRequest({ sites, onClose, onDone }: { sites: PortalMe['sites']; onCl
           <label className="field">جوال المستلم<input {...bind('recipient_phone')} className="num" inputMode="tel" maxLength={20} /></label>
         </div>
         <div className="row"><button className="primary" disabled={busy}>إرسال الطلب</button><button type="button" onClick={onClose}>إلغاء</button></div>
+      </form>
+    </Modal>
+  );
+}
+
+interface PStaffing {
+  requests: { id: string; ref: string; site: ConcreteSite; headcount: number; starts_on: string; ends_on: string; shift_start: string; shift_end: string; work_days: number[]; bill_unit: string; state: string;
+    placements: { placement_id: string; worker_name: string | null; starts_on: string; ends_on: string; licence_valid: boolean }[] }[];
+  shifts: { task_id: string; request_ref: string; work_date: string; status: string; worker_name: string | null; check_in: string | null; check_out: string | null; hours: number | null; days: number | null; disputed: boolean; dispute_reason: string | null }[];
+}
+
+/** Driver supply: who is placed with the customer (first name and licence check only), and the worked days to approve or dispute. */
+function StaffingSection() {
+  const st = useLoad(() => api<PStaffing>('/portal/staffing'));
+  const [sel, setSel] = useState<string[]>([]);
+  const [disputing, setDisputing] = useState<PStaffing['shifts'][number] | null>(null);
+  const act = useAction();
+  const d = st.data;
+  if (!d || d.requests.length === 0) return st.error ? <ErrorBox error={st.error} /> : null;
+  const open = d.shifts.filter((s) => s.status === 'completed' && !s.disputed);
+  const approve = () => act.run(async () => { await api('/portal/staffing/approve', { method: 'POST', body: { task_ids: sel } }); setSel([]); await st.reload(); });
+  return (
+    <section className="card stack" data-testid="portal-staffing">
+      <h2>توريد السائقين</h2>
+      <ErrorBox error={act.error} />
+      <div className="tbl-wrap"><table>
+        <thead><tr><th>الطلب</th><th>الفترة والدوام</th><th>السائقون</th><th>الحالة</th></tr></thead>
+        <tbody>{d.requests.map((r) => (
+          <tr key={r.id}>
+            <td><span className="num">{r.ref}</span><div className="muted">{siteLine(r.site)}</div></td>
+            <td><span className="num">{day(r.starts_on)} – {day(r.ends_on)}</span><div className="muted">{workDaysLine(r.work_days)} · <span className="num">{r.shift_start}–{r.shift_end}</span></div></td>
+            <td>{r.placements.length === 0 ? '—' : r.placements.map((p) => <div key={p.placement_id}>{p.worker_name} {p.licence_valid ? <Badge tone="success">الرخصة سارية</Badge> : <Badge tone="danger">الرخصة غير سارية</Badge>}</div>)}
+              <div className="muted"><span className="num">{r.placements.length}/{r.headcount}</span></div></td>
+            <td><Tone map={REQUEST_STATE} value={r.state} /></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      <h3 style={{ margin: 0 }}>أيام العمل (آخر 31 يومًا)</h3>
+      <p className="muted" style={{ margin: 0 }}>اعتمد الأيام الصحيحة لتدخل الفاتورة، أو اعترض على ساعات يوم ليراجعه المكتب.</p>
+      {d.shifts.length === 0 ? <Empty>لا أيام عمل بعد</Empty> : (
+        <div className="tbl-wrap"><table data-testid="portal-shifts">
+          <thead><tr><th><input type="checkbox" aria-label="تحديد الكل" checked={sel.length > 0 && sel.length === open.length} onChange={(e) => setSel(e.target.checked ? open.map((s) => s.task_id) : [])} /></th>
+            <th>اليوم</th><th>الطلب</th><th>السائق</th><th>الحضور</th><th>الانصراف</th><th>الساعات</th><th>الحالة</th><th></th></tr></thead>
+          <tbody>{d.shifts.map((s) => (
+            <tr key={s.task_id}>
+              <td>{s.status === 'completed' && !s.disputed && <input type="checkbox" aria-label={`اعتماد يوم ${s.work_date}`} checked={sel.includes(s.task_id)} onChange={(e) => setSel(e.target.checked ? [...sel, s.task_id] : sel.filter((x) => x !== s.task_id))} />}</td>
+              <td className="num">{day(s.work_date)}</td><td className="num">{s.request_ref}</td><td>{s.worker_name ?? '—'}</td>
+              <td className="num">{time(s.check_in)}</td><td className="num">{time(s.check_out)}</td><td>{s.days ? `${s.days} يوم` : hours(s.hours)}</td>
+              <td>{s.disputed ? <Badge tone="warning">اعتراض قيد المراجعة</Badge> : s.status === 'reviewed' || s.status === 'invoiced' ? <Badge tone="success">معتمد</Badge> : <StatusBadge status={s.status} />}</td>
+              <td>{s.status === 'completed' && !s.disputed && <button className="small" onClick={() => setDisputing(s)}>اعتراض</button>}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      {open.length > 0 && <div className="row"><button className="primary" disabled={act.busy || sel.length === 0} onClick={() => void approve()}>اعتماد المحدد ({sel.length})</button></div>}
+      {disputing && <DisputeForm s={disputing} onClose={() => setDisputing(null)} onDone={() => { setDisputing(null); void st.reload(); }} />}
+    </section>
+  );
+}
+
+function DisputeForm({ s, onClose, onDone }: { s: PStaffing['shifts'][number]; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState('');
+  const { busy, error, run } = useAction();
+  return (
+    <Modal title={`اعتراض على يوم ${day(s.work_date)}`} onClose={onClose}>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await api('/portal/staffing/dispute', { method: 'POST', body: { task_id: s.task_id, reason } }); onDone(); }); }}>
+        <ErrorBox error={error} />
+        <p style={{ margin: 0 }}>{s.worker_name}: حضور <span className="num">{time(s.check_in)}</span>، انصراف <span className="num">{time(s.check_out)}</span> ({hours(s.hours)}).</p>
+        <label className="field">سبب الاعتراض<input value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={500} placeholder="مثال: غادر الساعة 4 عصرًا" /></label>
+        <div className="row"><button className="primary" disabled={busy}>إرسال الاعتراض</button><button type="button" onClick={onClose}>رجوع</button></div>
       </form>
     </Modal>
   );

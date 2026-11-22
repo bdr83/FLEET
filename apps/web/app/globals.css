@@ -181,3 +181,14 @@ fieldset.addr legend { padding: 0 6px; color: var(--muted); font-size: 13px; }
 .modal:has(.pour-modal) { width: min(940px, 100%); }
 button.link { all: unset; color: var(--primary); cursor: pointer; }
 button.link:hover { text-decoration: underline; }
+
+/* staffing: coverage grid and weekday pickers */
+.alert.warn { background: var(--warning-soft); color: var(--warning); }
+.coverage td.cov { text-align: center; position: relative; min-width: 64px; }
+.coverage td.cov.short { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.coverage td.cov.ok { background: var(--info-soft); color: var(--info); }
+.coverage td.cov.in { background: var(--success-soft); color: var(--success); }
+.coverage td.cov.off { color: var(--muted); }
+.cov-flag { position: absolute; top: 2px; inset-inline-end: 4px; font-size: 11px; color: var(--danger); }
+fieldset.weekdays { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; flex-wrap: wrap; gap: 12px; }
+fieldset.weekdays legend { padding: 0 4px; color: var(--muted); font-size: 13px; }

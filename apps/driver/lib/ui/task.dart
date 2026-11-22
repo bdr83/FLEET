@@ -40,8 +40,22 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isStaffing) ...[
+          Card(key: const Key('shift-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('مناوبة لدى العميل', style: text.labelMedium),
+            if (t.shift != null) Row(children: [const Text('الدوام: '), Ltr(t.shift!, style: text.headlineSmall)]),
+            if (t.workDate != null) Row(children: [const Text('اليوم: '), Ltr(t.workDate!)]),
+            if (t.requestRef != null) Row(children: [const Text('الطلب: '), Ltr(t.requestRef!)]),
+            const SizedBox(height: 4),
+            const Text('سجّل الحضور عند وصولك لموقع العميل، والانصراف عند نهاية الدوام. يُحسب الوقت بينهما ساعات عمل.'),
+            if (['assigned', 'accepted'].contains(t.status) && !checkInOpen(t, DateTime.now()))
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text('يفتح تسجيل الحضور ${kwTime(t.windowFrom!.subtract(earlyCheckIn), date: true)}',
+                  key: const Key('checkin-opens'), style: const TextStyle(fontWeight: FontWeight.bold))),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(t.isConcrete ? 'الموقع' : 'العنوان', style: text.labelMedium),
+          Text(t.isConcrete || t.isStaffing ? 'الموقع' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
           if (t.notes != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(t.notes!)),
           if (t.windowFrom != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('الموعد: ${kwTime(t.windowFrom, date: true)} إلى ${kwTime(t.windowTo)}')),
@@ -49,15 +63,15 @@ class TaskScreen extends StatelessWidget {
           OutlinedButton.icon(onPressed: () => _navigate(t), icon: const Icon(Icons.navigation_outlined), label: const Text('الملاحة')),
         ]))),
         const SizedBox(height: 12),
-        if (t.isConcrete && (t.siteContact != null || t.sitePhone != null))
+        if ((t.isConcrete || t.isStaffing) && (t.siteContact != null || t.sitePhone != null))
           Card(child: ListTile(
-            leading: const Icon(Icons.engineering_outlined),
-            title: Text(t.siteContact ?? 'مهندس الموقع'),
+            leading: Icon(t.isStaffing ? Icons.badge_outlined : Icons.engineering_outlined),
+            title: Text(t.siteContact ?? (t.isStaffing ? 'المسؤول لدى العميل' : 'مهندس الموقع')),
             subtitle: t.sitePhone == null ? null : Ltr(t.sitePhone!),
             trailing: t.sitePhone == null ? null : IconButton.filledTonal(
               tooltip: 'اتصال', icon: const Icon(Icons.call), onPressed: () => launchUrl(Uri.parse('tel:${t.sitePhone}'))),
           )),
-        if (!t.isConcrete && (t.recipientName != null || t.recipientPhone != null))
+        if (!t.isConcrete && !t.isStaffing && (t.recipientName != null || t.recipientPhone != null))
           Card(child: ListTile(
             leading: const Icon(Icons.person_outline),
             title: Text(t.recipientName ?? 'المستلم'),
@@ -164,6 +178,13 @@ class _ActionsState extends State<_Actions> {
       case TaskAction.atSite: await s.milestone(task.id, 'at_site');
       case TaskAction.pourStart: await s.milestone(task.id, 'pour_start');
       case TaskAction.pourEnd: await s.milestone(task.id, 'pour_end');
+      case TaskAction.checkIn: await s.checkIn(task.id);
+      case TaskAction.checkOut:
+        await s.checkOut(task.id);
+        if (context.mounted) {
+          toast(context, s.offline ? 'سُجّل الانصراف وسيُرسل عند عودة الاتصال' : 'سُجّل الانصراف. يومك بانتظار اعتماد العميل');
+          Navigator.of(context).pop();
+        }
       case TaskAction.returned:
         await s.milestone(task.id, 'returned_to_sender');
         if (context.mounted) Navigator.of(context).pop();
@@ -182,15 +203,15 @@ class _ActionsState extends State<_Actions> {
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
         padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
         child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('سبب تعذّر التنفيذ', style: Theme.of(ctx).textTheme.titleLarge),
+          Text(task.isStaffing ? 'سبب المغادرة المبكرة' : 'سبب تعذّر التنفيذ', style: Theme.of(ctx).textTheme.titleLarge),
           const SizedBox(height: 8),
-          if (task.isDelivery || task.isConcrete)
+          if (failReasonsFor(task) case final reasons?)
             RadioGroup<String>(
               groupValue: reason,
               onChanged: (v) => set(() => reason = v),
-              child: Column(children: [for (final e in (task.isConcrete ? concreteFailReasons : failReasons).entries) RadioListTile<String>(value: e.key, title: Text(e.value), dense: true)]),
+              child: Column(children: [for (final e in reasons.entries) RadioListTile<String>(value: e.key, title: Text(e.value), dense: true)]),
             ),
-          TextField(controller: note, maxLength: 500, decoration: InputDecoration(labelText: task.isDelivery || task.isConcrete ? 'ملاحظة (اختياري)' : 'السبب')),
+          TextField(controller: note, maxLength: 500, decoration: InputDecoration(labelText: failReasonsFor(task) != null ? 'ملاحظة (اختياري)' : 'السبب')),
           FilledButton(
             onPressed: () => (reason != null || note.text.trim().isNotEmpty) ? Navigator.pop(ctx, true) : null,
             style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),

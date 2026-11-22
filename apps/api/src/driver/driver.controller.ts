@@ -8,12 +8,18 @@ import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 import { FAIL_REASONS, isDelivery, needsProof, PIN_MAX_ATTEMPTS, STAGE_ALLOWED, STAGES } from '../sectors/delivery/delivery';
 import * as concrete from '../sectors/concrete/concrete';
+import * as staffing from '../sectors/staffing/staffing';
+import { haversineKm } from '../sectors/delivery/delivery';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
+  if (staffing.isStaffing(pack)) {
+    const c = code as staffing.Stage;
+    return (staffing.STAGES as readonly string[]).includes(code) ? { allowed: staffing.STAGE_ALLOWED[c], needs: staffing.STAGE_NEEDS[c] } : null;
+  }
   if (concrete.isConcrete(pack)) {
     const c = code as concrete.Stage;
     return (concrete.STAGES as readonly string[]).includes(code) ? { allowed: concrete.STAGE_ALLOWED[c], needs: concrete.STAGE_NEEDS[c] } : null;
@@ -21,7 +27,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
   return null;
 }
 function reasonsOf(pack: string): readonly string[] | null {
-  return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : null;
+  return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -261,7 +267,9 @@ export class DriverController {
                           'planned_arrival', l.planned_arrival, 'site_ready', p.site_ready, 'mix_code', p.mix_code)
                      FROM ops.load_ticket l JOIN ops.pour_order p ON p.id = l.pour_order_id WHERE l.task_id = t.id) AS ticket
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
-            WHERE t.status IN ('assigned','accepted','in_progress')
+            WHERE (t.status IN ('assigned','accepted','in_progress')
+                   -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
+                   AND (t.sector_pack IS DISTINCT FROM 'staffing@1' OR t.status = 'in_progress' OR (lower(t.service_window) < now() + interval '36 hours' AND upper(t.service_window) > now() - interval '6 hours')))
                OR ($2 AND t.status = 'failed' AND t.sector_pack = 'delivery@1'
                    AND NOT EXISTS (SELECT 1 FROM ops.task_milestone m WHERE m.task_id = t.id AND m.code = 'returned_to_sender'))
             ORDER BY lower(t.service_window) NULLS LAST, t.id LIMIT 200`, [w.id, returns])).rows,
@@ -320,7 +328,7 @@ export class DriverController {
         const reject = (reason: string, status?: string) => results.push({ client_op_id: op.client_op_id, result: 'rejected', reason, ...(status ? { status } : {}) });
         if (!inWindow(op.occurred_at)) { reject('bad_time'); continue; }
         const t = (await c.query(
-          `SELECT t.status, t.sector_pack, t.legal_entity_id, t.attributes FROM ops.task t
+          `SELECT t.status, t.sector_pack, t.legal_entity_id, t.attributes, lower(t.service_window) AS win_from FROM ops.task t
             WHERE t.id = $1 AND EXISTS (SELECT 1 FROM ops.assignment x WHERE x.task_id = t.id AND x.active AND x.worker_id = $2)
             FOR UPDATE OF t`, [op.task_id, w.id])).rows[0];
         if (!t) { reject('not_assigned_to_you'); continue; }
@@ -333,8 +341,20 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if (concrete.isConcrete(t.sector_pack) && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack))
+            && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
+          }
+          if (staffing.isStaffing(t.sector_pack) && op.code === 'check_in' && t.win_from
+            && op.occurred_at.getTime() < t.win_from.getTime() - staffing.EARLY_CHECKIN_MINUTES * 60_000) {
+            reject('too_early', t.status); continue;
+          }
+          if (staffing.isStaffing(t.sector_pack) && op.code === 'check_in') {
+            // how far from the customer's site the driver checked in; the board flags it beyond the radius (not a block: GPS can drift)
+            const site = t.attributes?.dropoff;
+            const dist = op.lat != null && op.lng != null && typeof site?.lat === 'number' && typeof site?.lng === 'number'
+              ? Math.round(haversineKm({ lat: op.lat, lng: op.lng }, site) * 1000) : null;
+            await c.query('UPDATE ops.staffing_shift SET checkin_distance_m = $2 WHERE task_id = $1', [op.task_id, dist]);
           }
           if (concrete.isConcrete(t.sector_pack) && op.code === 'loaded') {
             // batching starts the concrete age clock on the ticket
@@ -413,6 +433,20 @@ export class DriverController {
           && (await c.query('SELECT 1 FROM ops.load_ticket WHERE task_id = $1 AND signed_at IS NULL', [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue;
         }
+        if (op.to_status === 'in_progress' && staffing.isStaffing(t.sector_pack)
+          && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'check_in'`, [op.task_id])).rowCount) {
+          reject('stage_out_of_order', t.status); continue; // the shift starts with the check-in
+        }
+        let staffQty: Record<string, number> | null = null;
+        if (op.to_status === 'completed' && staffing.isStaffing(t.sector_pack)) {
+          const ms = (await c.query(
+            `SELECT min(occurred_at) FILTER (WHERE code = 'check_in') AS cin, min(occurred_at) FILTER (WHERE code = 'check_out') AS cout
+               FROM ops.task_milestone WHERE task_id = $1`, [op.task_id])).rows[0];
+          if (!ms.cin || !ms.cout) { reject('proof_required', t.status); continue; }
+          // what the invoice prices: worked hours rounded to the step, or one day
+          const step = (await staffing.settingsOf(c, t.legal_entity_id)).hour_rounding_minutes;
+          staffQty = t.attributes?.bill_unit === 'day' ? { day: 1 } : { hour: staffing.roundHours((ms.cout.getTime() - ms.cin.getTime()) / 60_000, step) };
+        }
         if (op.to_status === 'completed' && delivery && (await needsProof(c, t))
           && !(await c.query('SELECT 1 FROM ops.delivery_pod WHERE task_id = $1', [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue;
@@ -422,6 +456,9 @@ export class DriverController {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [randomUUID(), a.tenantId, op.task_id, t.status, op.to_status, op.occurred_at, a.userId, op.client_op_id, op.note, op.to_status === 'failed' ? reasonCode : null])) {
           await c.query('UPDATE ops.task SET status = $2, version = version + 1 WHERE id = $1', [op.task_id, op.to_status]);
+          if (staffQty) {
+            await c.query(`UPDATE ops.task SET attributes = attributes || jsonb_build_object('quantities', $2::jsonb) WHERE id = $1`, [op.task_id, JSON.stringify(staffQty)]);
+          }
           if (concrete.isConcrete(t.sector_pack) && (op.to_status === 'completed' || op.to_status === 'failed')) {
             // the mixer is free once it is back at the plant: shorten its booking so it can take the next load
             const back = (await concrete.settingsOf(c, t.legal_entity_id)).lead_minutes;

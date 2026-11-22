@@ -231,3 +231,31 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 الإسناد بالواجهة العامة `/tasks/:id/assign` مع `asset_id` الخلاطة. قيد تداخل المركبة يمنع إسناد خلاطة لحمولتين متداخلتين، وعند اكتمال الحمولة أو فشلها تُقصّر نافذتها حتى عودة الخلاطة.
 
 في `/driver/sync`: `milestone {code: loaded|at_site|pour_start|pour_end}` بالترتيب (`stage_out_of_order`، `stage_already_recorded`)، و`loaded` يسجّل وقت الخلط في التذكرة. `ticket {poured_m3, returned_m3?, signed_by, file_key?}` بعد انتهاء الصب فقط؛ المصبوب والمرتجع لا يتجاوزان الحمولة (`quantity_exceeds_load`)، والتذكرة لا تُعدّل بعد التوقيع (`already_signed`، ومحمية في قاعدة البيانات). التوقيع يكتب `attributes.quantities = {m3, hour}` للفاتورة: الساعات = الانتظار بعد المجاني بالربع ساعة. الإكمال يحتاج التذكرة (`proof_required`)، والمراجعة كذلك. أسباب الفشل: site_not_ready, age_exceeded, rejected_by_site, truck_breakdown, pump_breakdown, customer_canceled, other (سبب من قطاع آخر يُرفض `invalid_reason`). `GET /driver/tasks` يضيف `ticket` للحمولات.
+
+## قطاع توريد السائقين staffing@1 (القطاع 14)
+
+طلب العميل يُوفَّر بتعيين سائقين عليه لفترات. كل يوم عمل في التعيين مهمة عادية بنوع `staffing@1` ورقم `REF-seq-YYYYMMDD` ونافذة الدوام بتوقيت الشركة (نهاية قبل البداية = دوام ليلي ينتهي في اليوم التالي)، مسندة للسائق إسنادًا حصريًا، ولها صف في `ops.staffing_shift`. تُولَّد المناوبات حتى 93 يومًا مقدمًا، و`POST /staffing/generate` يكمل الباقي (مهمة يومية في الإنتاج). حالة الطلب تُشتق: upcoming، active، ended، canceled.
+
+| الطريقة | المسار | الصلاحية | الوصف |
+|---|---|---|---|
+| GET/PUT | `/staffing/settings?legal_entity_id=` | tasks:read / org:write | نطاق الموقع للحضور بالمتر، مهلة التأخير، تقريب الساعات (1، 5، 10، 15، 30، 60 دقيقة)، المستندات المطلوبة للأهلية [تخمين للقيم الافتراضية] |
+| GET | `/staffing/requests?all=` | tasks:read | الطلبات السارية والقادمة (أو كلها) مع عدد المعيّنين الآن |
+| POST | `/staffing/requests` | tasks:write | `{legal_entity_id, customer_id, ref, site_id?, site{name, area, block, street, notes, lat, lng, contact_name, contact_phone}, worker_kind: driver\|courier, with_vehicle?, headcount, starts_on, ends_on, shift_start, shift_end, work_days[0..6]?, bill_unit: hour\|day, notes?}`؛ نفس ref يعيد الطلب نفسه، والفترة سنة كحد أقصى |
+| GET | `/staffing/requests/:id` | tasks:read | الطلب والتعيينات مع أهلية كل سائق، ومناوبات أسبوع قبل اليوم وبعده |
+| POST | `/staffing/requests/:id/cancel` | tasks:write | `{version, reason}` تنتهي التعيينات اليوم وتُلغى المناوبات القادمة غير المبدوءة |
+| GET | `/staffing/requests/:id/candidates` | tasks:read | السائقون من النوع والشركة نفسيهما مع فحص المستندات للفترة والتعيين المتداخل إن وُجد |
+| POST | `/staffing/requests/:id/placements` | tasks:assign | `{worker_id, asset_id?, starts_on?, ends_on?}`؛ يُرفض غير المؤهل (409 مع التفاصيل) والطلب المكتمل العدد والتعيين المتداخل للسائق (قيد في قاعدة البيانات)، ويولّد المناوبات |
+| POST | `/staffing/placements/:id/end` | tasks:assign | `{reason, end_on?}` يقصّر التعيين ويلغي المناوبات بعده، أو يزيله إن لم يبدأ |
+| POST | `/staffing/generate` | tasks:assign | يولّد المناوبات الناقصة للتعيينات السارية |
+| POST | `/staffing/shifts/:id/replace` | tasks:assign | `{worker_id, asset_id?}` بديل مؤهل لليوم؛ يُحفظ السائق الأصلي |
+| POST | `/staffing/shifts/:id/absent` | tasks:write | `{reason?}` غياب بلا بديل: تُلغى المناوبة |
+| GET | `/staffing/board?from&days` | tasks:read | لكل طلب ولكل يوم: المطلوب والمغطى ومن حضر والغياب والبدلاء، ومؤشرات اليوم |
+| GET | `/staffing/exceptions` | tasks:read | لم يحضر بعد المهلة، مناوبات قريبة بلا سائق، حضور أبعد من النطاق، مستندات تنتهي، طلبات تنتهي خلال أسبوع، اعتراضات مفتوحة |
+| GET | `/staffing/timesheet?from&to&request_id` | tasks:read | أيام العمل بالحضور والانصراف والساعات والحالة والاعتراض (حتى 93 يومًا) |
+| POST | `/staffing/approve` | tasks:write | `{task_ids}` اعتماد المكتب نيابة عن العميل؛ يُتخطى المعترض عليه وغير المكتمل |
+| POST | `/staffing/disputes/:id/resolve` | tasks:write | `{resolution, hours?}` الساعات المتفق عليها تحل محل المسجّلة (بلا ساعات للفوترة باليوم) |
+
+بوابة العميل: `GET /portal/staffing` طلباته والمعيّنون بالاسم الأول وحالة الرخصة فقط وأيام آخر 31 يومًا، و`POST /portal/staffing/approve {task_ids}`، و`POST /portal/staffing/dispute {task_id, reason}` (اعتراض مفتوح واحد لكل يوم؛ يبقى اليوم خارج الفاتورة حتى يُحل). `GET /portal/tasks` لا يعرض مناوبات التوريد.
+
+في `/driver/sync`: `milestone {code: check_in|check_out}`؛ الحضور بعد القبول ويفتح قبل بداية الدوام بساعتين (`too_early`) ويسجّل بُعده عن الموقع إن أُرسل الموقع، والبدء `in_progress` يحتاج الحضور، والانصراف يحتاج الحضور، والإكمال يحتاج الانصراف (`proof_required`). الإكمال يكتب `attributes.quantities = {hour}` (الوقت من الحضور للانصراف مقرّبًا) أو `{day: 1}`. أسباب المغادرة المبكرة: sick, vehicle_breakdown, sent_home_by_customer, other. `GET /driver/tasks` يعرض مناوبات التوريد التي تبدأ خلال 36 ساعة فقط. اعتماد العميل (أو المكتب) = المراجعة، ثم الفاتورة بسعر "ساعة" أو "يوم" في عقد العميل لنوع `staffing@1`.
+

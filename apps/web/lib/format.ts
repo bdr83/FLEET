@@ -158,3 +158,18 @@ export function siteLine(s: ConcreteSite | null | undefined): string {
   return parts.length ? parts.join('، ') : '—';
 }
 export const m3 = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })} م³`);
+
+/** Driver supply pack (staffing@1) labels. */
+export const STAFFING_STAGE: Record<string, string> = { check_in: 'سجّل الحضور', check_out: 'سجّل الانصراف' };
+Object.assign(STAGE, STAFFING_STAGE);
+export const STAFFING_FAIL: Record<string, string> = { sick: 'مرض', vehicle_breakdown: 'عطل المركبة', sent_home_by_customer: 'صرفه العميل', other: 'سبب آخر' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(STAFFING_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+export const REQUEST_STATE: Record<string, { label: string; tone: string }> = {
+  upcoming: tone('قادم', 'info'), active: tone('ساري', 'success'), ended: tone('منتهٍ'), canceled: tone('ملغى'),
+};
+export const ELIGIBILITY: Record<string, { label: string; tone: string }> = { ok: tone('مستنداته سليمة', 'success'), warn: tone('مستند ينتهي خلال الفترة', 'warning'), blocked: tone('غير مؤهل', 'danger') };
+export const DOC_PROBLEM: Record<string, string> = { missing: 'غير موجود', expired: 'منتهٍ', expires_during: 'ينتهي خلال الفترة' };
+export const WORKER_DOC_TYPES = ['driving_license', 'residency', 'civil_id', 'work_permit'];
+export const WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+export const workDaysLine = (d: number[]) => (d.length === 7 ? 'كل الأيام' : d.join(',') === '0,1,2,3,4' ? 'الأحد – الخميس' : d.map((x) => WEEKDAYS[x]).join('، '));
+export const hours = (n: number | null | undefined) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })} س`);
