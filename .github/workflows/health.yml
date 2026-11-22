@@ -1,0 +1,33 @@
+# فحص الروابط العامة بعد النشر: من خارج السيرفر (GitHub) ومن السيرفر نفسه.
+name: health
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [deploy-runner]
+    types: [completed]
+jobs:
+  outside:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Public URLs
+        run: |
+          set -u; fail=0
+          for u in https://api.q8hub.com/health https://app.q8hub.com/; do
+            for i in 1 2 3 4 5 6; do
+              code=$(curl -s -o body -w '%{http_code}' -m 20 "$u" || true)
+              [ "$code" = 200 ] && break; sleep 10
+            done
+            echo "$u -> $code"; head -c 300 body; echo
+            [ "$code" = 200 ] || fail=1
+          done
+          echo | openssl s_client -connect api.q8hub.com:443 -servername api.q8hub.com 2>/dev/null | openssl x509 -noout -subject -issuer -enddate
+          exit $fail
+  server:
+    runs-on: [self-hosted, fleet-pilot]
+    steps:
+      - name: Through the shared nginx
+        run: |
+          for h in api.q8hub.com app.q8hub.com; do
+            curl -s -o /dev/null -w "$h via 127.0.0.1:443 -> %{http_code}\n" -m 15 --resolve "$h:443:127.0.0.1" "https://$h/" || true
+          done
+          docker ps --format '{{.Names}} {{.Status}}' | grep -E 'fleet|nginx'
