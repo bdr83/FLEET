@@ -268,6 +268,14 @@ class AppState extends ChangeNotifier {
   }
 
   /// End of the working day: hour meter, downtime from breakdowns and the site supervisor who confirmed; ends the day.
+  /// Cranes: a lift done with the wind speed read on site, or aborted with the reason; checked online at once (wind limit, approval).
+  Future<String?> markLift(String taskId, String liftId, String event, {double? wind, String? note}) async {
+    final r = await _syncOp(taskId, {'type': 'lift', 'lift_id': liftId, 'event': event, 'wind_ms': ?wind, 'note': ?note}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (t) => t.copyWith(lifts: [for (final x in t.lifts ?? const []) if (x is Map && x['id'] == liftId) {...x, 'status': event} else x]));
+    return null;
+  }
+
   Future<String?> workEnd(String taskId, double meter, {double downtime = 0, required String signedBy}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_end', 'meter_hours': meter, 'downtime_hours': downtime, 'received_by': signedBy}, wait: true);
     if (r != null && !r.ok) return _refused(taskId, r);

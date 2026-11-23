@@ -405,4 +405,16 @@ void main() {
     expect(actionLabel(t, TaskAction.ogCheckin), 'بلاغ: الوضع سليم');
     expect(failReasonsFor(t), oilgasFailReasons);
   });
+
+  test('crane day: lift plans, critical blocked until approved, the day stays open while a lift is planned', () {
+    final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'equipment@1', 'attributes': {}, 'version': 1, 'lifts': [
+      {'id': 'a', 'ref': 'LP-1', 'time': '09:00:00', 'description': 'جسر', 'load_t': 10, 'radius_m': 8, 'rated_t': 20, 'utilization': 50, 'critical': false, 'approved': false, 'status': 'done', 'wind_limit_ms': 9},
+      {'id': 'b', 'ref': 'LP-2', 'time': null, 'description': 'مولد', 'load_t': 16, 'radius_m': 10, 'rated_t': 20, 'utilization': 80, 'critical': true, 'approved': false, 'status': 'planned'},
+    ]});
+    final l = t.liftList;
+    expect((l.length, l[0].time, l[0].windLimit, l[1].windLimit, l[0].blocked, l[1].blocked), (2, '09:00', 9.0, 9.8, false, true));
+    expect(t.liftsOpen, true);
+    expect(t.copyWith(lifts: [{...t.lifts![1] as Map, 'status': 'aborted'}]).liftsOpen, false);
+    expect(task('in_progress', pack: 'equipment@1').liftList, isEmpty);
+  });
 }

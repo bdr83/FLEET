@@ -7,7 +7,7 @@ import { AuthContext, AuthGuard, Perm } from '../auth/auth.guard';
 import { Auth } from '../auth/auth.decorator';
 
 /** Common document types. Sector packs may add more; the DB accepts any snake_case code. [تحقق محلي] */
-export const DOC_TYPES = ['driving_license', 'vehicle_registration', 'insurance', 'civil_id', 'residency', 'work_permit', 'inspection', 'h2s', 'defensive_driving', 'site_pass', 'hazmat', 'medical', 'site_sticker', 'other'] as const;
+export const DOC_TYPES = ['driving_license', 'vehicle_registration', 'insurance', 'civil_id', 'residency', 'work_permit', 'inspection', 'h2s', 'defensive_driving', 'site_pass', 'hazmat', 'medical', 'site_sticker', 'tpi_certificate', 'crane_operator', 'rigger_cert', 'other'] as const;
 const COLS = `id, legal_entity_id, asset_id, worker_id, doc_type, number, issued_on::text, expires_on::text, file_key, created_at`;
 
 @Controller('v1/documents')
