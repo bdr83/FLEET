@@ -142,6 +142,20 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isTaxi) ...[
+          Card(key: const Key('taxi-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${taxiClassLabels[t.attributes['class']] ?? ''} · ${t.attributes['booking_ref'] ?? ''}${t.attributes['flight_no'] != null ? ' · رحلة ${t.attributes['flight_no']}' : ''}', style: text.labelMedium),
+            Text(t.passengerName ?? '', style: text.titleLarge),
+            if (t.passengerPhone != null) Row(children: [const Text('الهاتف: '), Ltr(t.passengerPhone!)]),
+            if ((t.attributes['pax'] as num? ?? 1) > 1) Text('عدد الركاب: ${t.attributes['pax']}'),
+            Text('من: ${t.attributes['pickup_line'] ?? '—'}'),
+            Text('إلى: ${t.attributes['dropoff_line'] ?? 'يحددها الراكب'}'),
+            if (t.fixedFare != null) Row(children: [const Text('الأجرة: '), Ltr('${t.fixedFare} د.ك', style: text.titleMedium), const Text(' (ثابتة)')]),
+            if (t.onAccount) Text('على حساب ${t.attributes['customer_name'] ?? 'الشركة'}'),
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isTanker) ...[
           Card(key: const Key('tanker-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('صهريج · ${t.attributes['order_ref'] ?? ''}', style: text.labelMedium),
@@ -385,6 +399,16 @@ class _ActionsState extends State<_Actions> {
         final r = await _cargoForm(context, 'التحميل', 'تأكيد التحميل', receiver: false);
         if (r == null) return;
         await s.milestone(task.id, 'loaded', extra: {'weight_kg': ?r.weightKg, 'seal_no': ?r.seal});
+      case TaskAction.txArrived: await s.milestone(task.id, 'tx_arrived');
+      case TaskAction.txPicked: await s.milestone(task.id, 'tx_picked');
+      case TaskAction.txDropped:
+        final r = await _taxiForm(context);
+        if (r == null) return;
+        final err = await s.taxiDropped(task.id, km: r.km, payment: r.payment);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, s.offline ? 'سُجّل المشوار وسيُرسل عند عودة الاتصال' : 'انتهى المشوار');
+        Navigator.of(context).pop();
       case TaskAction.tankFilled:
       case TaskAction.tankDischarged:
         final fill = action == TaskAction.tankFilled;
@@ -529,6 +553,48 @@ class _ActionsState extends State<_Actions> {
           ),
         ]),
       )),
+    );
+  }
+
+  /// Taxi drop: the trip km (not needed for a fixed fare) and the payment; shows the fare to collect.
+  Future<({double? km, String payment})?> _taxiForm(BuildContext context) {
+    final km = TextEditingController();
+    String? pay = task.onAccount ? 'account' : 'cash';
+    bool ok() => pay != null && (task.fixedFare != null || parseKm(km.text) != null);
+    return showModalBottomSheet<({double? km, String payment})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final k = parseKm(km.text);
+        final fare = k == null && task.fixedFare == null ? null : task.fareFor(k ?? 0, 0);
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('نهاية المشوار', style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            TextField(key: const Key('trip-km'), controller: km, autofocus: task.fixedFare == null, keyboardType: const TextInputType.numberWithOptions(decimal: true), textDirection: TextDirection.ltr,
+                decoration: InputDecoration(labelText: task.fixedFare == null ? 'كيلومترات المشوار' : 'كيلومترات المشوار (اختياري)'), onChanged: (_) => set(() {})),
+            RadioGroup<String>(
+              groupValue: pay,
+              onChanged: (v) => set(() => pay = v),
+              child: Column(children: [
+                for (final e in paymentLabels.entries)
+                  if (e.key != 'account' || task.onAccount) RadioListTile<String>(value: e.key, title: Text(e.value), dense: true),
+              ]),
+            ),
+            if (fare != null) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [
+              const Text('الأجرة: '), Ltr('$fare د.ك', key: const Key('taxi-fare'), style: Theme.of(ctx).textTheme.headlineSmall),
+              if (task.fixedFare == null) const Text(' تقريبًا، بدون الانتظار'),
+            ])),
+            const SizedBox(height: 8),
+            FilledButton(
+              key: const Key('taxi-save'),
+              onPressed: ok() ? () => Navigator.pop(ctx, (km: parseKm(km.text), payment: pay!)) : null,
+              child: const Text('تأكيد'),
+            ),
+          ]),
+        );
+      }),
     );
   }
 

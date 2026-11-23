@@ -325,6 +325,27 @@ void main() {
     expect(failReasonsFor(t), schoolFailReasons);
   });
 
+  test('taxi ride: arrive, pick up, drop with km and payment; the fare from the tariff or fixed', () {
+    final t = task('in_progress', pack: 'taxi@1', attrs: {'kind': 'ride', 'passenger_name': 'محمد', 'address': 'حولي، ق 3', 'class': 'sedan',
+      'tariff': {'base': '0.350', 'per_km': '0.150', 'per_wait_min': '0.050', 'min_fare': '1.000'}});
+    expect((t.isTaxi, t.passengerName, t.address, t.onAccount), (true, 'محمد', 'حولي، ق 3', false));
+    expect(nextActions(t), [TaskAction.txArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'tx_arrived')), [TaskAction.txPicked, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'tx_picked')), [TaskAction.txDropped]);
+    expect(nextActions(t.copyWith(stage: 'tx_dropped')), [TaskAction.complete]);
+    expect(t.fareFor(10, 0), '1.850');
+    expect(t.fareFor(10, 8), '2.000');
+    expect(t.fareFor(2, 0), '1.000');
+    expect(task('in_progress', pack: 'taxi@1', attrs: {'fixed_fare': '12.000'}).fareFor(30, 20), '12.000');
+    expect(task('in_progress', pack: 'taxi@1').fareFor(5, 0), isNull);
+    expect(parseKm('12.5'), 12.5);
+    expect(parseKm('١٢٫٥'), 12.5);
+    expect(parseKm('12.55'), isNull);
+    expect(parseKm('2000'), isNull);
+    expect(actionLabel(t, TaskAction.txPicked), 'ركب الراكب');
+    expect(failReasonsFor(t), taxiFailReasons);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

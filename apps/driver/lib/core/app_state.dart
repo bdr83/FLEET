@@ -285,6 +285,15 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Taxi: the drop with the trip km and the payment (checked online at once), then ends the ride.
+  Future<String?> taxiDropped(String taskId, {double? km, required String payment}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tx_dropped', 'trip_km': ?km, 'payment': payment}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'tx_dropped'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Tanker: the litres filled and where (checked online at once against the tanker's capacity).
   Future<String?> tankFilled(String taskId, {required int litres, String? source}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tank_filled', 'litres': litres, 'note': ?source}, wait: true);

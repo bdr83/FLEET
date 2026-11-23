@@ -60,6 +60,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'school', sector: 10, label: 'النقل المدرسي', hint: 'خطوط صباحية وظهرية، طلاب وأولياء أمور، مشرفة، صعود ونزول وتسليم الطفل، بلاغات غياب، تنبيه طالب باقٍ في الحافلة' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
+  { code: 'taxi', sector: 12, label: 'التاكسي والليموزين', hint: 'حجوزات فورية ومسبقة ورحلات مطار، فئات سيارات وتعرفة، وصول وركوب ونزول بالكيلومترات، حسابات شركات ونقد السائقين' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
   { code: 'rental', sector: 17, label: 'تأجير السيارات', hint: 'حجوزات وعقود إيجار، استلام وإرجاع بالعدّاد والوقود، رسوم الكيلومترات والوقود والأضرار، توصيل للعميل، المخالفات' },
@@ -287,6 +288,16 @@ export const SCHOOL_STATE: Record<string, { label: string; tone: string }> = {
 };
 export const ABSENCE_SCOPE: Record<string, string> = { both: 'الذهاب والعودة', to_school: 'الذهاب فقط', from_school: 'العودة فقط' };
 export const REPORTED_BY: Record<string, string> = { guardian: 'ولي الأمر', school: 'المدرسة', office: 'المكتب' };
+
+/** Taxi and limousine (taxi pack) labels. */
+export const TX_CLASS: Record<string, string> = { sedan: 'صالون', suv: 'دفع رباعي', van: 'فان', luxury: 'ليموزين فاخرة' };
+export const TX_PAYMENT: Record<string, string> = { cash: 'نقدًا', card: 'بطاقة', account: 'على الحساب' };
+export const TX_STATE: Record<string, { label: string; tone: string }> = {
+  new: { label: 'بلا سيارة', tone: 'warning' }, assigned: { label: 'مسند', tone: 'info' }, on_way: { label: 'في الطريق للراكب', tone: 'info' },
+  waiting: { label: 'ينتظر الراكب', tone: 'warning' }, on_trip: { label: 'في المشوار', tone: 'info' }, done: { label: 'انتهى', tone: 'success' },
+  failed: { label: 'تعذّر', tone: 'danger' }, canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const TX_FAIL: Record<string, string> = { passenger_no_show: 'الراكب لم يحضر', passenger_canceled: 'ألغى الراكب', vehicle_breakdown: 'عطل في السيارة', other: 'سبب آخر' };
 
 /** Heavy equipment hire (equipment pack) labels. */
 export const RATE_UNIT: Record<string, string> = { hour: 'بالساعة', day: 'باليوم', month: 'بالشهر' };

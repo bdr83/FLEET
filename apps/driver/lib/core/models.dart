@@ -132,6 +132,21 @@ class DriverTask {
   bool get isContainer => sectorPack == 'containers@1';
   String? get containerNo => attributes['container_no'] as String?;
   bool get needsGateRef => attributes['gate'] == true;
+  /// A taxi or limousine ride (taxi pack): arrive at the pickup → passenger on board → dropped (km, payment; ends the ride).
+  bool get isTaxi => sectorPack == 'taxi@1';
+  String? get passengerName => attributes['passenger_name'] as String?;
+  String? get passengerPhone => attributes['passenger_phone'] as String?;
+  String? get fixedFare => attributes['fixed_fare'] as String?;
+  bool get onAccount => attributes['account'] == true;
+  /// The fare to show the passenger: the fixed price, or the class tariff for the km and waiting minutes; null when unknown.
+  String? fareFor(double km, int waitMin) {
+    if (fixedFare != null) return fixedFare;
+    final t = _map(attributes['tariff']);
+    if (t == null) return null;
+    int f(Object? x) => ((double.tryParse('$x') ?? 0) * 1000).round();
+    final v = f(t['base']) + (f(t['per_km']) * km).round() + f(t['per_wait_min']) * (waitMin - taxiFreeWaitMin).clamp(0, 10000);
+    return ((v > f(t['min_fare']) ? v : f(t['min_fare'])) / 1000).toStringAsFixed(3);
+  }
   /// A tanker trip (tankers pack): fill (litres, the source), then discharge (litres, the receiver).
   bool get isTanker => sectorPack == 'tankers@1';
   String? get product => attributes['product'] as String?;
@@ -198,7 +213,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -272,7 +287,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -285,6 +300,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isMoving) return _movingActions(t);
   if (t.isContainer) return _containerActions(t);
   if (t.isTanker) return _tankerActions(t);
+  if (t.isTaxi) return _taxiActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -446,6 +462,56 @@ List<TaskAction> _containerActions(DriverTask t) {
   }
 }
 
+/// Taxi ride: accept → on the way → arrived → passenger on board → dropped (km, payment) → done. A no-show after waiting.
+List<TaskAction> _taxiActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        'tx_dropped' => [TaskAction.complete],
+        'tx_picked' => [TaskAction.txDropped],
+        'tx_arrived' => [TaskAction.txPicked, TaskAction.fail],
+        _ => [TaskAction.txArrived, TaskAction.fail],
+      };
+    default:
+      return [];
+  }
+}
+
+/// Same as the API (taxi FREE_WAIT_MIN). [تخمين]
+const taxiFreeWaitMin = 5;
+
+/// Trip km typed by the driver: 0-1000, one decimal (Arabic digits and a comma accepted).
+double? parseKm(String raw) {
+  final s = raw.trim().replaceAllMapped(RegExp('[٠-٩]'), (m) => '${m[0]!.codeUnitAt(0) - 0x0660}').replaceAll(RegExp('[,٫]'), '.');
+  if (!RegExp(r'^\d{1,4}(\.\d)?$').hasMatch(s)) return null;
+  final n = double.parse(s);
+  return n > 1000 ? null : n;
+}
+
+const taxiActionLabels = {
+  TaskAction.accept: 'قبول الحجز',
+  TaskAction.start: 'انطلقت للراكب',
+  TaskAction.txArrived: 'وصلت لمكان الراكب',
+  TaskAction.txPicked: 'ركب الراكب',
+  TaskAction.txDropped: 'وصلنا، إنهاء المشوار',
+  TaskAction.complete: 'إنهاء الحجز',
+  TaskAction.fail: 'تعذّر المشوار',
+};
+
+/// Same codes as the API (taxi FAIL_REASONS).
+const taxiFailReasons = {
+  'passenger_no_show': 'الراكب لم يحضر (بعد 10 دقائق انتظار)',
+  'passenger_canceled': 'ألغى الراكب',
+  'vehicle_breakdown': 'عطل في السيارة',
+  'other': 'سبب آخر',
+};
+const taxiClassLabels = {'sedan': 'صالون', 'suv': 'دفع رباعي', 'van': 'فان', 'luxury': 'ليموزين فاخرة'};
+const paymentLabels = {'cash': 'نقدًا', 'card': 'بطاقة', 'account': 'على حساب الشركة'};
+
 /// Tanker trip: accept → on the way → filled (litres, source) → discharged (litres, receiver; ends the trip).
 List<TaskAction> _tankerActions(DriverTask t) {
   switch (t.status) {
@@ -523,6 +589,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (containerActionLabels[a] ?? actionLabels[a]!)
                             : t.isTanker
                             ? (tankerActionLabels[a] ?? actionLabels[a]!)
+                            : t.isTaxi
+                            ? (taxiActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -871,7 +939,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -949,6 +1017,11 @@ const rejectReasons = {
   'item_not_planned': 'صنف غير مخطط لهذا التوقف',
   'cash_required': 'أدخل المبلغ المحصّل',
   'unknown_rider': 'الراكب ليس على هذا الخط، حدّث القائمة',
+  'payment_required': 'اختر طريقة الدفع',
+  'km_required': 'أدخل كيلومترات المشوار',
+  'no_account': 'هذا الحجز ليس على حساب شركة',
+  'not_arrived': 'سجّل وصولك لمكان الراكب أولًا',
+  'wait_more': 'انتظر 10 دقائق من الوصول قبل تسجيل عدم حضور الراكب',
   'unknown_student': 'الطالب ليس على هذا الخط، حدّث القائمة',
   'students_on_board': 'ما زال طالب في الحافلة، سجّل نزوله قبل إنهاء الرحلة',
   'students_unmarked': 'سجّل صعود كل طالب أو غيابه قبل إنهاء الرحلة',
