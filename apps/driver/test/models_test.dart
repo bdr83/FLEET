@@ -262,6 +262,22 @@ void main() {
     expect(parseQty('1.234'), isNull);
   });
 
+  test('move: load, unload with the receiver; a helper keeps the plain flow', () {
+    final t = task('assigned', pack: 'moving@1', attrs: {'kind': 'move', 'move_ref': 'MV-1', 'home_size': 'apt_2', 'fragile': ['تلفزيون'], 'address': 'الجابرية، ق 4', 'pickup_address': 'السالمية، ق 10'});
+    expect((t.isMoving, t.isMoveCrew, t.address, t.pickupLine), (true, false, 'الجابرية، ق 4', 'السالمية، ق 10'));
+    expect(t.fragileItems, ['تلفزيون']);
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.start]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.loaded, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'loaded')), [TaskAction.unloaded, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'unloaded')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.loaded), 'انتهى التحميل');
+    expect(failReasonsFor(t), movingFailReasons);
+    final h = task('assigned', pack: 'moving@1', attrs: {'kind': 'crew', 'move_ref': 'MV-1', 'address': 'الجابرية، ق 4'});
+    expect((h.isMoving, h.isMoveCrew, h.address), (false, true, 'الجابرية، ق 4'));
+    expect(nextActions(h.copyWith(status: 'in_progress')), [TaskAction.complete, TaskAction.fail]);
+    expect(actionLabel(h, TaskAction.start), 'بدأت العمل');
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

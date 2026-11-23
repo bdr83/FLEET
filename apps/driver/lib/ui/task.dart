@@ -142,6 +142,25 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isMoving || t.isMoveCrew) ...[
+          Card(key: const Key('move-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('نقل أثاث · ${t.attributes['move_ref'] ?? ''}${t.isMoveCrew ? ' · ضمن الطاقم' : ''}', style: text.labelMedium),
+            if (t.attributes['home_size'] != null) Text(moveSizeLabels[t.attributes['home_size']] ?? '${t.attributes['home_size']}', style: text.titleLarge),
+            if (t.attributes['items_count'] is num && (t.attributes['items_count'] as num) > 0)
+              Text('${t.attributes['items_count']} قطعة${t.attributes['volume_m3'] is num ? ' · ${t.attributes['volume_m3']} م³' : ''}'),
+            if (t.fragileItems.isNotEmpty) Text('قابل للكسر: ${t.fragileItems.join('، ')}', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            if ((t.attributes['services'] as List?)?.isNotEmpty ?? false) Text([for (final x in t.attributes['services'] as List) moveServiceLabels[x] ?? '$x'].join(' · ')),
+            if (t.attributes['customer_name'] != null) Text('العميل: ${t.attributes['customer_name']}'),
+            if (t.attributes['contact_phone'] != null) Row(children: [const Text('الهاتف: '), Ltr('${t.attributes['contact_phone']}')]),
+            if (t.attributes['crew'] is num && (t.attributes['crew'] as num) > 0) Text('معك ${t.attributes['crew']} عمال'),
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}'),
+            const SizedBox(height: 6),
+            Text('التحميل من', style: text.labelMedium),
+            Text(t.pickupLine.isEmpty ? '—' : t.pickupLine),
+            if (t.isMoving) ...[const SizedBox(height: 4), const Text('سجّل انتهاء التحميل، ثم انتهاء التفريغ واسم المستلم وأي ضرر لاحظته.')],
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isRental) ...[
           Card(key: const Key('rental-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('تأجير سيارة · ${t.rentalRef ?? ''}', style: text.labelMedium),
@@ -161,7 +180,7 @@ class TaskScreen extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight ? 'التفريغ في' : 'العنوان', style: text.labelMedium),
+          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight || t.isMoving || t.isMoveCrew ? 'التفريغ في' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
           if (t.notes != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(t.notes!)),
           if (t.windowFrom != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('الموعد: ${kwTime(t.windowFrom, date: true)} إلى ${kwTime(t.windowTo)}')),
@@ -325,6 +344,14 @@ class _ActionsState extends State<_Actions> {
         final r = await _cargoForm(context, 'التحميل', 'تأكيد التحميل', receiver: false);
         if (r == null) return;
         await s.milestone(task.id, 'loaded', extra: {'weight_kg': ?r.weightKg, 'seal_no': ?r.seal});
+      case TaskAction.unloaded when task.isMoving:
+        final r = await _moveForm(context);
+        if (r == null) return;
+        final err = await s.moveDone(task.id, receivedBy: r.receiver, note: r.note);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, s.offline ? 'سُجّل التسليم وسيُرسل عند عودة الاتصال' : 'انتهى النقل وأُرسل للمكتب');
+        Navigator.of(context).pop();
       case TaskAction.unloaded:
         final r = await _cargoForm(context, 'التفريغ والتسليم', 'تأكيد التسليم', receiver: true);
         if (r == null) return;
@@ -433,6 +460,30 @@ class _ActionsState extends State<_Actions> {
               receiver: receiver ? other.text.trim() : null,
             )),
             child: Text(confirm),
+          ),
+        ]),
+      )),
+    );
+  }
+
+  /// End of a move: the receiver's name (required) and any damage or missing item noticed.
+  Future<({String receiver, String? note})?> _moveForm(BuildContext context) {
+    final who = TextEditingController(), note = TextEditingController();
+    return showModalBottomSheet<({String receiver, String? note})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('التفريغ والتسليم', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          TextField(key: const Key('received-by'), controller: who, autofocus: true, decoration: const InputDecoration(labelText: 'اسم المستلم'), onChanged: (_) => set(() {})),
+          TextField(key: const Key('move-note'), controller: note, maxLength: 500, maxLines: 2, decoration: const InputDecoration(labelText: 'ضرر أو نقص لاحظته (إن وُجد)')),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('move-save'),
+            onPressed: who.text.trim().isEmpty ? null : () => Navigator.pop(ctx, (receiver: who.text.trim(), note: note.text.trim().isEmpty ? null : note.text.trim())),
+            child: const Text('تأكيد التسليم'),
           ),
         ]),
       )),

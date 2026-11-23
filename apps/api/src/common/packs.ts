@@ -4,6 +4,7 @@ export const PACKS = [
   { code: 'freight', sector: 2, label: 'الشحن والنقل البري' },
   { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد' },
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع' },
+  { code: 'moving', sector: 5, label: 'نقل الأثاث' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين' },

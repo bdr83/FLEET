@@ -106,6 +106,11 @@ class DriverTask {
   bool get isCollect => attributes['kind'] == 'collect';
   /// A technician's visit (service pack): arrive, then the result with the work done, the parts and the customer's name.
   bool get isService => sectorPack == 'service@1';
+  /// A move (moving pack): the truck's driver loads at the old home, then unloads at the new one with the receiver's name.
+  bool get isMoving => sectorPack == 'moving@1' && attributes['kind'] == 'move';
+  /// A helper's day on a move: the plain flow (accept, start, done).
+  bool get isMoveCrew => sectorPack == 'moving@1' && attributes['kind'] == 'crew';
+  List<String> get fragileItems => [for (final x in (attributes['fragile'] as List? ?? const [])) if (x is String) x];
   String? get problem => attributes['problem'] as String?;
   String? get category => attributes['category'] as String?;
   bool get urgent => attributes['priority'] == 'urgent';
@@ -166,7 +171,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -250,6 +255,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isEquipment) return _equipmentActions(t);
   if (t.isRental) return _rentalActions(t);
   if (t.isService) return _serviceActions(t);
+  if (t.isMoving) return _movingActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -383,6 +389,20 @@ List<TaskAction> _serviceActions(DriverTask t) {
   }
 }
 
+/// Move: accept → on the way → loaded at the old home → unloaded at the new one (receiver's name; ends the move).
+List<TaskAction> _movingActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return t.stage == 'unloaded' ? [TaskAction.complete] : t.stage == 'loaded' ? [TaskAction.unloaded, TaskAction.fail] : [TaskAction.loaded, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
 /// Distribution route: accept → check the load (odometer) → leave the depot → (stops) → back at the depot (odometer) → done.
 List<TaskAction> _routeActions(DriverTask t) {
   switch (t.status) {
@@ -414,9 +434,39 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                         ? (equipmentActionLabels[a] ?? actionLabels[a]!)
                         : t.isService
                             ? (serviceActionLabels[a] ?? actionLabels[a]!)
+                            : t.isMoving
+                            ? (movingActionLabels[a] ?? actionLabels[a]!)
+                            : t.isMoveCrew
+                            ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
                             ? ((t.isCollect && a == TaskAction.start ? 'انطلقت لاستلام السيارة' : null) ?? rentalActionLabels[a] ?? actionLabels[a]!)
                             : actionLabels[a]!;
+
+const movingActionLabels = {
+  TaskAction.accept: 'قبول النقل',
+  TaskAction.start: 'انطلقت للعميل',
+  TaskAction.loaded: 'انتهى التحميل',
+  TaskAction.unloaded: 'انتهى التفريغ والتسليم',
+  TaskAction.complete: 'إنهاء النقل',
+  TaskAction.fail: 'تعذّر النقل',
+};
+const moveCrewActionLabels = {
+  TaskAction.accept: 'قبول المهمة',
+  TaskAction.start: 'بدأت العمل',
+  TaskAction.complete: 'انتهى العمل',
+  TaskAction.fail: 'تعذّر الحضور',
+};
+
+/// Same codes as the API (moving FAIL_REASONS).
+const movingFailReasons = {
+  'customer_absent': 'العميل غير موجود',
+  'no_access': 'تعذّر الدخول أو التحميل',
+  'customer_canceled': 'ألغى العميل',
+  'truck_breakdown': 'عطل الشاحنة',
+  'other': 'سبب آخر',
+};
+const moveSizeLabels = {'room': 'غرفة', 'studio': 'استوديو', 'apt_1': 'شقة غرفة', 'apt_2': 'شقة غرفتين', 'apt_3': 'شقة 3 غرف', 'apt_4': 'شقة 4 غرف+', 'villa': 'فيلا / بيت', 'office': 'مكتب'};
+const moveServiceLabels = {'packing': 'تغليف', 'assembly': 'فك وتركيب', 'crating': 'صناديق خشبية', 'storage': 'تخزين', 'cleaning': 'تنظيف'};
 
 const serviceActionLabels = {
   TaskAction.accept: 'قبول الزيارة',
@@ -661,7 +711,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
