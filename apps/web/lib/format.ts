@@ -54,6 +54,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد', hint: 'مسارات مبردة ومجمدة، نوافذ تسليم، قراءات حرارة، تالف وصلاحية' },
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع', hint: 'بوليصات ومحطات، مسح الباركود، محاولات التسليم، الإرجاع للمرسل' },
   { code: 'moving', sector: 5, label: 'نقل الأثاث', hint: 'طلبات نقل بمعاينة وقائمة أغراض، عرض سعر وعربون، شاحنة وطاقم ليوم النقل، مطالبات الأضرار والتقييم' },
+  { code: 'containers', sector: 6, label: 'الحاويات والموانئ', hint: 'حاويات استيراد وتصدير بين الميناء والساحة والعميل، تأكيد رقم الحاوية، إيصال البوابة، مراقبة الأرضيات والتأخير' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين', hint: 'مواقع تخزين، استلام وصرف، أقدم صلاحية أولًا، جرد، تخزين للعملاء' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
@@ -312,3 +313,13 @@ export const MV_STATE: Record<string, { label: string; tone: string }> = {
   closed: { label: 'مغلق', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
 };
 export const MV_CLAIM: Record<string, { label: string; tone: string }> = { open: { label: 'مفتوحة', tone: 'warning' }, settled: { label: 'سُوّيت', tone: 'success' }, rejected: { label: 'مرفوضة', tone: 'muted' } };
+
+/** Containers and ports (containers pack) labels. */
+export const CT_DIRECTION: Record<string, string> = { import: 'استيراد', export: 'تصدير', local: 'نقل داخلي' };
+export const CT_TYPE: Record<string, string> = { dry: 'جاف', high_cube: 'عالي', reefer: 'مبرد', open_top: 'مفتوح السقف', flat_rack: 'مسطح', tank: 'صهريج' };
+export const CT_PORT: Record<string, string> = { shuwaikh: 'الشويخ', shuaiba: 'الشعيبة', doha: 'الدوحة', other: 'آخر' };
+export const CT_LEG: Record<string, string> = { port_to_customer: 'من الميناء للعميل', empty_to_depot: 'إرجاع الفارغة للساحة', empty_to_customer: 'فارغة من الساحة للعميل', full_to_port: 'الممتلئة للميناء', transfer: 'نقل' };
+export const CT_STATE: Record<string, { label: string; tone: string }> = {
+  waiting: { label: 'بانتظار السحب', tone: 'warning' }, in_transit: { label: 'على الطريق', tone: 'info' }, at_customer: { label: 'عند العميل', tone: 'info' },
+  done: { label: 'أُرجعت، جاهزة للإغلاق', tone: 'success' }, closed: { label: 'مغلقة', tone: 'muted' }, canceled: { label: 'ملغاة', tone: 'muted' },
+};

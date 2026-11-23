@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -514,4 +514,51 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | حسب تاريخ النقل: الطلبات والعروض والقبول ونسبته والإيراد (السعر + الإضافي للمغلقة) ومتوسط التقييم والمطالبات والتعويضات، وحسب الحجم |
 
 السائق: تحمل مهمة `moving@1` الرئيسية `kind: move` و`move_ref`، `home_size`، `services`، `volume_m3`، `items_count`، `fragile`، `pickup_address`، `address`، `customer_name`، `contact_phone`، `crew`. في `POST /v1/driver/sync`: محطة `loaded`، ثم `unloaded` مع `received_by` (اسم المستلم) و`note` (ضرر أو نقص). إنهاء المهمة يحتاج `unloaded`. رمز الرفض: `receiver_required`. مهام الطاقم `kind: crew` بالتدفق العادي (قبول، بدء، إنهاء) دون محطات.
+
+## قطاع الحاويات والموانئ containers (القطاع 6)
+
+كل عملية (`CT-n`) تخص حاوية واحدة، ورقمها يُفحص حسب ISO 6346 مع خانة التحقق. ولكل حاوية عملية مفتوحة واحدة فقط في الوقت نفسه.
+
+الرحلات حسب الاتجاه:
+- الاستيراد: `port_to_customer` من الميناء إلى العميل، ثم `empty_to_depot` لإرجاع الفارغة إلى الساحة.
+- التصدير: `empty_to_customer` فارغة من الساحة إلى العميل، ثم `full_to_port` الممتلئة إلى الميناء.
+- النقل الداخلي: `transfer`.
+
+كل رحلة مهمة `containers@1` تحجز الشاحنة والسائق حصريًا، والمدة الافتراضية 180 دقيقة [تخمين]. يمكن حجز الرحلة التالية مسبقًا، لكن السائق لا يسحب الحاوية قبل انتهاء الرحلة السابقة.
+
+الحالات:
+- `waiting`: في الميناء أو الساحة.
+- `in_transit`: على الطريق.
+- `at_customer`: عند العميل.
+- `done`: أُرجعت أو أُدخلت الميناء.
+- `closed`: مغلقة.
+- `canceled`: ملغاة.
+
+المراقبة:
+- أيام الأرضيات: من بعد `last_free_day` حتى سحب حاوية الاستيراد من الميناء.
+- أيام التأخير: من بعد `return_by` حتى الإرجاع أو الإدخال.
+- الحساب بأيام الكويت.
+
+المبالغ يدخلها المكتب عند الإغلاق.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/containers/jobs` | الإنشاء بالحقول: `{legal_entity_id, customer_id, direction: import\|export\|local, container_no, iso_size: 20\|40\|45, ctype?: dry\|high_cube\|reefer\|open_top\|flat_rack\|tank, port: shuwaikh\|shuaiba\|doha\|other, site{name?, area, ...}, line?, doc_no?, seal_no?, weight_kg?, depot?, last_free_day?, return_by?, notes?}`. يرجع 409 `container_open`. البحث بـ `?q=` (رقم الحاوية أو البوليصة) والتصفية بـ `?state=` |
+| `GET /jobs/:id` | يرجع العملية مع `legs` و`state` و`next_leg` و`next_booked` و`storage_days` و`detention_days` |
+| `POST /jobs/:id/legs` | يحجز الرحلة التالية: `{driver_worker_id, asset_id, starts_at?, duration_min?}`. يرجع 409 `vehicle_booked` أو `driver_booked` أو «all legs are booked» |
+| `POST /jobs/:id/ready` | `{at?, seal_no?}`: العميل فرّغ الحاوية أو حمّلها، وهي جاهزة للسحب |
+| `POST /jobs/:id/dates` | `{last_free_day?, return_by?}`: تمديد من الخط الملاحي |
+| `POST /jobs/:id/close` | `{haulage_amount?, extra_amount?}`، بعد `done` فقط |
+| `POST /jobs/:id/cancel` | `{reason}`، قبل سحب الحاوية فقط |
+| `GET /board?date=` | رحلات اليوم مرتبة حسب الشاحنة |
+| `GET /yard` | قوائم `waiting` و`in_transit` و`at_customer` (مع `days_at_customer`) |
+| `GET /exceptions` | `storage_risk`: آخر يوم مجاني اليوم أو غدًا أو فات [تخمين]. `detention_risk`. `ready_to_collect`: جاهزة بلا رحلة. `unbooked`. `to_close` |
+| `GET /report?from&to` | الحاويات وTEU والاستيراد والتصدير، والرحلات المنفذة، وأيام الأرضيات والتأخير، والمبالغ، وتفصيل حسب الخط الملاحي |
+
+**تطبيق السائق:** تحمل المهمة في `attributes` الحقول `leg` و`container_no` و`iso_size` و`ctype` و`line` و`doc_no` و`seal_no` و`pickup_address` و`address` و`gate` (هل التسليم عند بوابة). خطوات `POST /v1/driver/sync`:
+- محطة `ctr_picked` مع `container_no` (كما قرأه السائق) و`seal_no` اختياري.
+- ثم محطة `ctr_dropped` مع `received_by` عند العميل، أو `gate_ref` (رقم إيصال EIR) عند الميناء أو الساحة.
+- إنهاء المهمة يحتاج `ctr_dropped`.
+
+رموز الرفض: `container_required`، `container_mismatch`، `previous_leg_open`، `receiver_required`، `gate_ref_required`.
 

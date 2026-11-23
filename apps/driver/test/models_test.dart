@@ -278,6 +278,20 @@ void main() {
     expect(actionLabel(h, TaskAction.start), 'بدأت العمل');
   });
 
+  test('container leg: pick with the number, drop with the receiver or gate receipt', () {
+    final t = task('assigned', pack: 'containers@1', attrs: {'kind': 'leg', 'leg': 'empty_to_depot', 'container_no': 'MSCU1234566', 'gate': true, 'address': 'ساحة الصليبية', 'pickup_address': 'الري'});
+    expect((t.isContainer, t.containerNo, t.needsGateRef, t.address, t.pickupLine), (true, 'MSCU1234566', true, 'ساحة الصليبية', 'الري'));
+    expect(nextActions(t.copyWith(status: 'accepted')), [TaskAction.start]);
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.ctrPicked, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'ctr_picked')), [TaskAction.ctrDropped, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'ctr_dropped')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.ctrPicked), 'سحبت الحاوية');
+    expect(failReasonsFor(t), containerFailReasons);
+    expect(normContainer('csqu 305438-3'), 'CSQU3054383');
+    expect(normContainer('CSQU3054384'), isNull);
+    expect(normContainer('MSCU1234566'), 'MSCU1234566');
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

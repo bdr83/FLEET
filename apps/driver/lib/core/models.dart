@@ -110,6 +110,10 @@ class DriverTask {
   bool get isMoving => sectorPack == 'moving@1' && attributes['kind'] == 'move';
   /// A helper's day on a move: the plain flow (accept, start, done).
   bool get isMoveCrew => sectorPack == 'moving@1' && attributes['kind'] == 'crew';
+  /// A container leg (containers pack): pick the box up (confirm its number, the seal), then drop it with the receiver or the gate receipt.
+  bool get isContainer => sectorPack == 'containers@1';
+  String? get containerNo => attributes['container_no'] as String?;
+  bool get needsGateRef => attributes['gate'] == true;
   List<String> get fragileItems => [for (final x in (attributes['fragile'] as List? ?? const [])) if (x is String) x];
   String? get problem => attributes['problem'] as String?;
   String? get category => attributes['category'] as String?;
@@ -171,7 +175,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -245,7 +249,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -256,6 +260,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isRental) return _rentalActions(t);
   if (t.isService) return _serviceActions(t);
   if (t.isMoving) return _movingActions(t);
+  if (t.isContainer) return _containerActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -403,6 +408,37 @@ List<TaskAction> _movingActions(DriverTask t) {
   }
 }
 
+/// Container leg: accept → on the way → picked up (the number checked) → dropped (receiver or gate receipt; ends the leg).
+List<TaskAction> _containerActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return t.stage == 'ctr_dropped' ? [TaskAction.complete] : t.stage == 'ctr_picked' ? [TaskAction.ctrDropped, TaskAction.fail] : [TaskAction.ctrPicked, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
+/// ISO 6346 container number with its check digit (spaces and dashes dropped); null when invalid.
+String? normContainer(String raw) {
+  final s = raw.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+  if (!RegExp(r'^[A-Z]{3}[UJZR][0-9]{7}$').hasMatch(s)) return null;
+  final letters = <String, int>{};
+  var n = 10;
+  for (final ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')) {
+    if (n % 11 == 0) n++;
+    letters[ch] = n++;
+  }
+  var sum = 0;
+  for (var i = 0; i < 10; i++) {
+    sum += (i < 4 ? letters[s[i]]! : int.parse(s[i])) * (1 << i);
+  }
+  return (sum % 11) % 10 == int.parse(s[10]) ? s : null;
+}
+
 /// Distribution route: accept → check the load (odometer) → leave the depot → (stops) → back at the depot (odometer) → done.
 List<TaskAction> _routeActions(DriverTask t) {
   switch (t.status) {
@@ -436,11 +472,34 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (serviceActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoving
                             ? (movingActionLabels[a] ?? actionLabels[a]!)
+                            : t.isContainer
+                            ? (containerActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
                             ? ((t.isCollect && a == TaskAction.start ? 'انطلقت لاستلام السيارة' : null) ?? rentalActionLabels[a] ?? actionLabels[a]!)
                             : actionLabels[a]!;
+
+const containerActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.start: 'انطلقت لسحب الحاوية',
+  TaskAction.ctrPicked: 'سحبت الحاوية',
+  TaskAction.ctrDropped: 'سلّمت الحاوية',
+  TaskAction.complete: 'إنهاء الرحلة',
+  TaskAction.fail: 'تعذّرت الرحلة',
+};
+
+/// Same codes as the API (containers FAIL_REASONS).
+const containerFailReasons = {
+  'not_released': 'الحاوية غير مفرج عنها',
+  'port_closed': 'البوابة مغلقة أو زحام',
+  'customer_absent': 'العميل غير موجود',
+  'truck_breakdown': 'عطل الشاحنة',
+  'wrong_container': 'حاوية مختلفة',
+  'other': 'سبب آخر',
+};
+const containerLegLabels = {'port_to_customer': 'من الميناء إلى العميل', 'empty_to_depot': 'إرجاع الفارغة للساحة', 'empty_to_customer': 'فارغة من الساحة إلى العميل', 'full_to_port': 'الممتلئة إلى الميناء', 'transfer': 'نقل حاوية'};
+const containerTypeLabels = {'dry': 'جاف', 'high_cube': 'عالي', 'reefer': 'مبرد', 'open_top': 'مفتوح السقف', 'flat_rack': 'مسطح', 'tank': 'صهريج'};
 
 const movingActionLabels = {
   TaskAction.accept: 'قبول النقل',
@@ -711,7 +770,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
