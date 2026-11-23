@@ -132,6 +132,8 @@ class DriverTask {
   bool get isContainer => sectorPack == 'containers@1';
   String? get containerNo => attributes['container_no'] as String?;
   bool get needsGateRef => attributes['gate'] == true;
+  /// An oilfield journey (oilgas pack): inspect the vehicle → leave (once approved) → call in at the interval → arrive.
+  bool get isOilgas => sectorPack == 'oilgas@1';
   /// A tour bus (tour pack): the group boards (head count, odometer) → back (head count, odometer, a note when fewer) → done.
   bool get isTour => sectorPack == 'tour@1';
   List<Map<String, dynamic>> get itinerary => (attributes['itinerary'] as List? ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
@@ -216,7 +218,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -290,7 +292,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned, ogInspect, ogDepart, ogCheckin, ogArrived }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -305,6 +307,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isTanker) return _tankerActions(t);
   if (t.isTaxi) return _taxiActions(t);
   if (t.isTour) return _tourActions(t);
+  if (t.isOilgas) return _oilgasActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -503,6 +506,59 @@ List<TaskAction> _tourActions(DriverTask t) {
   }
 }
 
+/// Oilfield journey: accept → start → vehicle inspected → departed (once approved) → call-ins → arrived → done.
+List<TaskAction> _oilgasActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        'og_arrived' => [TaskAction.complete],
+        'og_departed' || 'og_checkin' => [TaskAction.ogCheckin, TaskAction.ogArrived, TaskAction.fail],
+        'og_inspected' => [TaskAction.ogDepart, TaskAction.fail],
+        _ => [TaskAction.ogInspect, TaskAction.fail],
+      };
+    default:
+      return [];
+  }
+}
+
+const oilgasActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.start: 'بدء الرحلة',
+  TaskAction.ogInspect: 'فحص المركبة قبل الانطلاق',
+  TaskAction.ogDepart: 'انطلقت',
+  TaskAction.ogCheckin: 'بلاغ: الوضع سليم',
+  TaskAction.ogArrived: 'وصلت الموقع',
+  TaskAction.complete: 'إنهاء الرحلة',
+  TaskAction.fail: 'تعذّرت الرحلة',
+};
+
+/// Same codes as the API (oilgas FAIL_REASONS).
+const oilgasFailReasons = {
+  'vehicle_breakdown': 'عطل في المركبة',
+  'inspection_failed': 'المركبة لم تجتز الفحص',
+  'site_closed': 'الموقع مغلق',
+  'gate_refused': 'رُفض الدخول من البوابة',
+  'weather': 'الطقس (غبار، ضباب)',
+  'accident': 'حادث',
+  'other': 'سبب آخر',
+};
+
+/// The pre-trip checklist, same items as the API (oilgas CHECKS); the H2S monitor only in an H2S zone.
+const oilgasChecks = {
+  'tyres': 'الإطارات',
+  'brakes': 'الفرامل',
+  'lights': 'الأضواء',
+  'seat_belts': 'أحزمة الأمان',
+  'fire_extinguisher': 'طفاية الحريق',
+  'first_aid': 'حقيبة الإسعاف',
+  'spill_kit': 'عدة احتواء الانسكاب',
+  'h2s_monitor': 'جهاز كشف H2S',
+};
+
 const tourActionLabels = {
   TaskAction.accept: 'قبول الرحلة',
   TaskAction.start: 'انطلقت لنقطة التجمع',
@@ -640,6 +696,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (taxiActionLabels[a] ?? actionLabels[a]!)
                             : t.isTour
                             ? (tourActionLabels[a] ?? actionLabels[a]!)
+                            : t.isOilgas
+                            ? (oilgasActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -988,7 +1046,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1071,6 +1129,9 @@ const rejectReasons = {
   'no_account': 'هذا الحجز ليس على حساب شركة',
   'not_arrived': 'سجّل وصولك لمكان الراكب أولًا',
   'wait_more': 'انتظر 10 دقائق من الوصول قبل تسجيل عدم حضور الراكب',
+  'checks_required': 'أكمل قائمة الفحص',
+  'inspection_failed': 'المركبة لم تجتز الفحص، أصلح الخلل أو أبلغ المكتب',
+  'not_approved': 'لم تُعتمد خطة الرحلة بعد، تواصل مع مدير الرحلات',
   'headcount_required': 'أدخل عدد الركاب',
   'over_seats': 'العدد أكثر من مقاعد الحافلة',
   'note_required': 'العائدون أقل من الصاعدين، اكتب السبب',

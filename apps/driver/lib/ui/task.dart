@@ -156,6 +156,23 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isOilgas) ...[
+          Card(key: const Key('oilgas-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${t.attributes['journey_ref'] ?? ''} · ${t.attributes['site_code'] ?? ''}', style: text.labelMedium),
+            Text('${t.attributes['site_name'] ?? ''}', style: text.titleLarge),
+            if (t.attributes['field'] != null) Text('الحقل: ${t.attributes['field']}'),
+            Text('من: ${t.attributes['from_place'] ?? '—'}'),
+            if (t.attributes['eta_at'] != null) Text('الوصول المتوقع: ${_stopAt(t.attributes['eta_at'] as String)}'),
+            if ((t.attributes['passengers'] as num? ?? 0) > 0) Text('الركاب: ${t.attributes['passengers']}'),
+            if (t.attributes['cargo'] != null) Text('الحمولة: ${t.attributes['cargo']}'),
+            if (t.attributes['hazmat'] == true) Text('⚠ حمولة خطرة', style: text.titleSmall?.copyWith(color: Theme.of(context).colorScheme.error)),
+            if (t.attributes['h2s_zone'] == true) const Text('منطقة H2S: جهاز الكشف إلزامي'),
+            Text('بلاغ كل ${t.attributes['checkin_min'] ?? 60} دقيقة'),
+            if (t.attributes['customer_name'] != null) Text('${t.attributes['customer_name']}'),
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isTour) ...[
           Card(key: const Key('tour-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('${t.attributes['trip_ref'] ?? ''} · حافلة ${t.attributes['bus_seq'] ?? ''}${t.attributes['cross_border'] == true ? ' · عبر الحدود' : ''}', style: text.labelMedium),
@@ -428,6 +445,19 @@ class _ActionsState extends State<_Actions> {
         if (err != null) return toast(context, err, error: true);
         toast(context, s.offline ? 'سُجّل المشوار وسيُرسل عند عودة الاتصال' : 'انتهى المشوار');
         Navigator.of(context).pop();
+      case TaskAction.ogInspect:
+        final checks = await _oilgasForm(context);
+        if (checks == null) return;
+        final err = await s.oilgasStage(task.id, 'og_inspected', checks: checks);
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.ogDepart:
+      case TaskAction.ogCheckin:
+      case TaskAction.ogArrived:
+        final code = {TaskAction.ogDepart: 'og_departed', TaskAction.ogCheckin: 'og_checkin', TaskAction.ogArrived: 'og_arrived'}[action]!;
+        final err = await s.oilgasStage(task.id, code);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        if (action == TaskAction.ogCheckin) toast(context, s.offline ? 'سُجّل البلاغ وسيُرسل عند عودة الاتصال' : 'وصل البلاغ لمدير الرحلات');
       case TaskAction.trBoarded:
       case TaskAction.trReturned:
         final out = action == TaskAction.trBoarded;
@@ -626,6 +656,27 @@ class _ActionsState extends State<_Actions> {
           ]),
         );
       }),
+    );
+  }
+
+  /// Oilfield pre-trip inspection: every item ticked passes; an unticked item is sent as failed (kept for the office).
+  Future<Map<String, bool>?> _oilgasForm(BuildContext context) {
+    final items = oilgasChecks.keys.where((k) => k != 'h2s_monitor' || task.attributes['h2s_zone'] == true).toList();
+    final v = {for (final k in items) k: false};
+    return showModalBottomSheet<Map<String, bool>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('فحص المركبة قبل الانطلاق', style: Theme.of(ctx).textTheme.titleLarge),
+          for (final k in items)
+            CheckboxListTile(key: Key('check-$k'), value: v[k], title: Text(oilgasChecks[k]!), onChanged: (x) => set(() => v[k] = x ?? false)),
+          const SizedBox(height: 8),
+          FilledButton(key: const Key('og-save'), onPressed: () => Navigator.pop(ctx, Map<String, bool>.from(v)),
+              child: Text(v.values.every((x) => x) ? 'تأكيد الفحص' : 'إرسال الفحص (فيه خلل)')),
+        ]),
+      )),
     );
   }
 

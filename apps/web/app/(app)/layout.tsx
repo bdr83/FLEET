@@ -23,6 +23,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/school', label: 'النقل المدرسي', perm: 'tasks:read', pack: 'school' },
   { href: '/taxi', label: 'التاكسي والليموزين', perm: 'tasks:read', pack: 'taxi' },
   { href: '/tour', label: 'الحافلات السياحية', perm: 'tasks:read', pack: 'tour' },
+  { href: '/oilgas', label: 'النفط والغاز', perm: 'tasks:read', pack: 'oilgas' },
   { href: '/shuttle', label: 'نقل الموظفين', perm: 'tasks:read', pack: 'shuttle' },
   { href: '/equipment', label: 'تأجير المعدات', perm: 'tasks:read', pack: 'equipment' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },

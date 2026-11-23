@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، oilgas، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -489,6 +489,25 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | GET | `/tours/report?from=&to=` | الرحلات والركاب والحافلات وأيام الحافلات والكيلومترات والمبالغ والعربون، إجمالًا ولكل عميل |
 
 من التطبيق: معلم `tr_boarded` ثم `tr_returned`، كلاهما مع `headcount` و`odometer_km` (أخطاء `headcount_required`، `odometer_required`، `over_seats`، `odometer_too_low`، و`note_required` إذا عاد عدد أقل بلا ملاحظة `note`). لا تنتهي المهمة قبل `tr_returned`.
+
+## قطاع خدمات النفط والغاز oilgas (القطاع 18)
+
+إدارة رحلات مقاولي النفط إلى مواقع الحقول. الموقع يحدد الوثائق الإلزامية للسائق والمركبة (من `core.document`)، وكون الموقع في منطقة H2S، وفترة البلاغ. كل رحلة خطة `JM-n` يعتمدها مدير الرحلات، ومهمة `JM-n-<محاولة>` تحجز المركبة والسائق من الانطلاق حتى `end_at`، وتتحرر المركبة عند الوصول.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST / PUT | `/oilgas/sites` ، `/oilgas/sites/:id` | المواقع: `code`، `name`، `field`، `customer_id`، `worker_docs`، `asset_docs` (من أنواع الوثائق، ومنها `h2s`، `defensive_driving`، `site_pass`، `hazmat`، `medical`، `site_sticker`)، `h2s_zone`، `checkin_min` |
+| GET / POST | `/oilgas/journeys` | رحلات يوم؛ الإنشاء: `site_id`، `purpose` (crew، equipment، materials، water، waste، other)، `from_place`، `depart_at`، `eta_at`، واختياريًا `end_at` (الوصول + 4 ساعات)، `passengers`، `cargo`، `hazmat` |
+| GET | `/oilgas/journeys/:id` | الخطة بحالتها (draft، approved، assigned، ready، en_route، arrived، done، failed، canceled)، وموعد البلاغ التالي، وآخر فحص للمركبة |
+| POST | `/oilgas/journeys/:id/approve` | اعتماد مدير الرحلات؛ لا ينطلق السائق قبله |
+| GET | `/oilgas/journeys/:id/candidates` | السائقون والمركبات المتاحون، مع الوثائق الناقصة أو المنتهية قبل نهاية الرحلة لكل منهم |
+| POST | `/oilgas/journeys/:id/assign` | `{asset_id, driver_worker_id}`؛ أخطاء `driver_docs`، `vehicle_docs`، `over_seats`، `vehicle_booked`، `driver_booked`. الحمولة الخطرة تضيف وثيقة `hazmat` للسائق |
+| POST | `/oilgas/journeys/:id/checkin` | بلاغ يسجله المكتب (لاسلكي أو هاتف) |
+| POST | `/oilgas/journeys/:id/cancel` | إلغاء رحلة لم تنطلق |
+| GET | `/oilgas/exceptions` | بلاغ فائت، تأخر عن الوصول المتوقع بـ 30 دقيقة، خطط تنطلق خلال ساعتين بلا اعتماد أو بلا مركبة، فحوص فيها خلل خلال 24 ساعة |
+| GET | `/oilgas/report?from=&to=` | الرحلات والمنتهية وفي الوقت والمتأخرة والملغاة والركاب والحمولات الخطرة والبلاغات، إجمالًا ولكل موقع |
+
+من التطبيق: `og_inspected` مع `checks` (tyres، brakes، lights، seat_belts، fire_extinguisher، first_aid، spill_kit، و`h2s_monitor` في منطقة H2S). الفحص الراسب يُحفظ ويُرفض بـ `inspection_failed`. بعده `og_departed` (يُرفض بـ `not_approved` قبل الاعتماد)، ثم `og_checkin` (يتكرر)، ثم `og_arrived`. لا تنتهي المهمة قبل `og_arrived`.
 
 ## قطاع تأجير المعدات الثقيلة equipment (القطاع 16)
 
