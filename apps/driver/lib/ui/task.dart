@@ -256,6 +256,10 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isWaste) ...[
+          _WasteCard(t: t),
+          const SizedBox(height: 12),
+        ],
         if (t.isEquipment && t.liftList.isNotEmpty) ...[
           _LiftsCard(t: t),
           const SizedBox(height: 12),
@@ -421,7 +425,7 @@ class _ActionsState extends State<_Actions> {
       case TaskAction.accept: await s.setStatus(task.id, 'accepted');
       case TaskAction.start: await s.setStatus(task.id, 'in_progress');
       case TaskAction.complete:
-        final block = task.isSchool ? task.schoolFinishBlock : null;
+        final block = task.isSchool ? task.schoolFinishBlock : task.isWaste ? task.wasteFinishBlock : null;
         if (block != null) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(rejectReasons[block] ?? block)));
           return;
@@ -1126,6 +1130,107 @@ class _LiftsCard extends StatelessWidget {
           Semantics(button: true, label: 'أوقفت ${l.ref}', excludeSemantics: true, child: TextButton(onPressed: () => _record(context, l, false), child: const Text('أوقفت'))),
         ]),
         if (l.status != 'planned') Text(l.status == 'done' ? 'نُفذت' : l.status == 'aborted' ? 'أُوقفت' : 'ملغاة', style: text.bodySmall),
+      ],
+    ])));
+  }
+}
+
+/// Waste round: the collection points in order with the customer's bins. The driver marks each point collected (bins
+/// emptied, the planned count by default) or missed with a reason, and records each tip at the landfill with the
+/// weighbridge ticket and net weight. The round ends when every point is marked and, if anything was collected, a ticket is in.
+class _WasteCard extends StatelessWidget {
+  const _WasteCard({required this.t});
+  final DriverTask t;
+
+  Future<void> _collected(BuildContext context, WastePoint p) async {
+    final s = AppScope.of(context);
+    final ctl = TextEditingController(text: '${p.binCount}');
+    final n = await showDialog<int>(context: context, builder: (ctx) => AlertDialog(
+      title: Text('جُمعت: ${p.name}'),
+      content: TextField(key: const Key('bins-emptied'), controller: ctl, autofocus: true, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'عدد الحاويات المفرّغة', helperText: p.binsText)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('رجوع')),
+        FilledButton(key: const Key('bins-ok'), onPressed: () => Navigator.pop(ctx, parseCount(ctl.text, 200)), child: const Text('تأكيد')),
+      ],
+    ));
+    if (n == null || !context.mounted) return;
+    if (n > p.binCount * 2) return toast(context, rejectReasons['bins_invalid']!, error: true);
+    await s.markVisit(t.id, p.id, 'collected', bins: n);
+  }
+
+  Future<void> _missed(BuildContext context, WastePoint p) async {
+    final s = AppScope.of(context);
+    final reason = await showDialog<String>(context: context, builder: (ctx) => SimpleDialog(
+      title: Text('لم تُجمع: ${p.name}'),
+      children: [for (final e in wasteMissReasons.entries) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, e.key), child: Text(e.value))],
+    ));
+    if (reason == null || !context.mounted) return;
+    await s.markVisit(t.id, p.id, 'missed', reason: reason);
+  }
+
+  Future<void> _dump(BuildContext context) async {
+    final s = AppScope.of(context);
+    final ticket = TextEditingController(), net = TextEditingController(), fac = TextEditingController(text: '${t.attributes['facility'] ?? ''}');
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('تفريغ في المردم'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(key: const Key('ticket-no'), controller: ticket, autofocus: true, decoration: const InputDecoration(labelText: 'رقم تذكرة الميزان')),
+        TextField(key: const Key('net-kg'), controller: net, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'الوزن الصافي (كغ)')),
+        TextField(key: const Key('facility'), controller: fac, decoration: const InputDecoration(labelText: 'المردم')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
+        FilledButton(key: const Key('dump-ok'), onPressed: () => Navigator.pop(ctx, true), child: const Text('تسجيل التذكرة')),
+      ],
+    ));
+    if (ok != true || !context.mounted) return;
+    final kg = double.tryParse(net.text.trim().replaceAll(',', '.'));
+    if (ticket.text.trim().isEmpty) return toast(context, rejectReasons['ticket_required']!, error: true);
+    if (kg == null || kg <= 0 || kg > 40000) return toast(context, rejectReasons['weight_required']!, error: true);
+    final err = await s.addDump(t.id, ticketNo: ticket.text.trim(), netKg: kg, facility: fac.text.trim().isEmpty ? null : fac.text.trim());
+    if (!context.mounted) return;
+    if (err != null) return toast(context, err, error: true);
+    toast(context, 'سُجّلت تذكرة الميزان');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final pts = t.wastePoints;
+    final open = t.status == 'in_progress';
+    int n(String? e) => pts.where((p) => p.event == e).length;
+    final kg = (t.waste?['net_kg'] as num?)?.toDouble() ?? 0;
+    return Card(key: const Key('waste-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text('جولة جمع · ${t.attributes['route_code'] ?? ''}', style: text.labelMedium),
+      Text('${t.attributes['route_name'] ?? ''}', style: text.titleLarge),
+      if (t.attributes['facility'] != null) Text('المردم: ${t.attributes['facility']}'),
+      const SizedBox(height: 6),
+      Text('جُمعت ${n('collected')} · لم تُجمع ${n('missed')} · باقية ${n(null)} · تذاكر ${t.wasteTickets}${kg > 0 ? ' (${qtyText(kg / 1000)} طن)' : ''}',
+          key: const Key('waste-count'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      if (!open && ['assigned', 'accepted'].contains(t.status)) const Padding(padding: EdgeInsets.only(top: 4), child: Text('ابدأ الجولة لتسجيل النقاط')),
+      for (final p in pts) ...[
+        const Divider(),
+        Row(children: [
+          Ltr('${p.seq}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(p.area != null ? '${p.name} · ${p.area}' : p.name, style: text.titleSmall)),
+          Icon(switch (p.event) { 'collected' => Icons.check_circle, 'missed' => Icons.cancel_outlined, _ => Icons.radio_button_unchecked },
+              size: 20, color: switch (p.event) { 'collected' => Colors.green, 'missed' => scheme.error, _ => null }),
+        ]),
+        Text(p.binsText),
+        if (p.customerName != null) Text(p.customerName!, style: text.bodySmall),
+        if (p.note != null) Text(p.note!, style: TextStyle(color: scheme.primary)),
+        if (p.event == 'collected') Text('حاويات مفرّغة: ${p.binsEmptied ?? 0}'),
+        if (p.event == 'missed') Text('لم تُجمع: ${wasteMissReasons[p.reason] ?? p.reason ?? ''}', style: TextStyle(color: scheme.error)),
+        if (open) Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          Semantics(button: true, label: 'جُمعت ${p.name}', excludeSemantics: true, child: TextButton(onPressed: () => _collected(context, p), child: const Text('جُمعت'))),
+          Semantics(button: true, label: 'لم تُجمع ${p.name}', excludeSemantics: true, child: TextButton(onPressed: () => _missed(context, p), child: const Text('لم تُجمع'))),
+        ]),
+      ],
+      if (open) ...[
+        const Divider(),
+        OutlinedButton.icon(key: const Key('dump'), onPressed: () => _dump(context), icon: const Icon(Icons.scale), label: const Text('تفريغ في المردم (تذكرة الميزان)')),
       ],
     ])));
   }

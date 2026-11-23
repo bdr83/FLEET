@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، oilgas، cranes، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، oilgas، cranes، service، waste) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -587,6 +587,25 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | البلاغات، الوصول في الموعد، الإصلاح من أول زيارة، متوسط الاستجابة، العمالة والقطع، حسب الفني والتخصص |
 
 الفني: تحمل مهمة `service@1` في `attributes` الحقول `job_ref`، `seq`، `category`، `priority`، `problem`، `unit`، `address`، `contact_phone`، `previous` (ملخص آخر الزيارات). في `POST /v1/driver/sync`: محطة `arrived`، ثم `work_done` مع `result` و`note` (ما تم من عمل) و`received_by` (اسم العميل) و`parts`. إنهاء المهمة يحتاج `work_done`. رموز الرفض: `result_required`، `work_required`، `signer_required`، `parts_invalid`.
+
+## قطاع جمع النفايات والتنظيف waste (القطاع 23)
+
+خطوط جمع ثابتة لكابسات النفايات. الخط له نوع نفايات (general، recyclable، construction، green، organic)، وموعد بدء ومدة، وأيام تشغيل (ISO 1-7)، ومردم افتراضي، وكابسة وسائق. نقاط الجمع مرتبة على الخط، لكل نقطة عميل وحاويات `bins` = `[{type, count}]` (bin_120، bin_240، bin_660، bin_1100، skip_6، skip_12، compactor، bag). كل يوم تشغيل تُولَّد جولة `WR-<الخط>-<التاريخ>` تحجز الكابسة والسائق حصريًا.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST / PATCH | `/waste/routes` ، `/waste/routes/:id` | الخطوط: `code`، `name`، `waste_type`، `start_time`، `duration_min`، `days`، `facility`، `asset_id`، `driver_worker_id`؛ التعديل بـ `version` |
+| GET / POST | `/waste/routes/:id/points` | نقاط الخط؛ الإضافة: `name`، `area`، `customer_id`، `bins`، `note`، `lat`/`lng`، واختياريًا `seq` (وإلا في آخر الخط) |
+| PATCH | `/waste/points/:id` | `bins`، `name`، `note`، `active` (إزالة النقطة تُغلق الفراغ في الترتيب) |
+| POST | `/waste/runs/generate` | `{date}`: جولات اليوم للخطوط العاملة فيه؛ تُتخطى الخطوط بلا كابسة أو سائق أو نقاط، أو المحجوزة، أو التي مضى موعدها |
+| GET | `/waste/runs?date=` ، `/waste/runs/:id` | الجولات بعدد النقاط المجموعة وغير المجموعة والحاويات والتذاكر والوزن؛ التفاصيل فيها كشف النقاط والتذاكر |
+| POST | `/waste/runs/:id/visit` | المكتب يسجل أو يصحح نقطة: `{point_id, event: collected, bins}` أو `{point_id, event: missed, reason}` (no_access، bins_not_out، blocked، contaminated، other)؛ آخر تسجيل هو المعتمد |
+| POST | `/waste/runs/:id/dump` | تذكرة ميزان: `ticket_no`، `net_kg`، `facility` |
+| POST | `/waste/runs/:id/cancel` | `{reason}` لجولة لم تبدأ |
+| GET | `/waste/exceptions?date=` | جولات لم تبدأ بعد 30 دقيقة، خطوط تعمل اليوم بلا جولة أو بلا كابسة أو سائق، نقاط لم تُجمع، ونقاط لم تُجمع في آخر جولتين |
+| GET | `/waste/report?from=&to=` | الجولات والمكتملة والنقاط المجموعة وغير المجموعة والحاويات والتذاكر والأطنان، إجمالًا ولكل خط، والنقاط لكل عميل |
+
+من التطبيق: مهمة الجولة تحمل `waste` (النقاط بحاوياتها وتسجيلها، وعدد التذاكر والوزن). عمليتا مزامنة: `{type: 'visit', point_id, event, bins, reason}` و`{type: 'dump', ticket_no, net_kg, facility}`، أثناء الجولة فقط. الرفض: `bins_required`، `bins_invalid` (أكثر من ضعف حاويات النقطة)، `miss_reason_required`، `unknown_point`، `ticket_required`، `weight_required`، `ticket_already_recorded`. لا تكتمل الجولة قبل تسجيل كل النقاط (`points_open`) ولا بلا تذكرة ميزان إن جُمعت نقطة (`dump_required`).
 
 ## قطاع نقل الأثاث moving (القطاع 5)
 

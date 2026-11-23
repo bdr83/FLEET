@@ -37,12 +37,14 @@ import * as oilgas from '../sectors/oilgas/oilgas';
 import { oilgasStage } from '../sectors/oilgas/oilgas.controller';
 import * as cranes from '../sectors/cranes/cranes';
 import { liftsOpen, markLift } from '../sectors/cranes/cranes.controller';
+import * as waste from '../sectors/waste/waste';
+import { addDump, markVisit, wasteFinish } from '../sectors/waste/waste.controller';
 import { markStudent, schoolFinish } from '../sectors/school/school.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
 const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES, ...taxi.STAGES, ...tour.STAGES, ...oilgas.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS, ...tour.FAIL_REASONS, ...oilgas.FAIL_REASONS])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS, ...tour.FAIL_REASONS, ...oilgas.FAIL_REASONS, ...waste.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -104,7 +106,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : tour.isTour(pack) ? tour.FAIL_REASONS : oilgas.isOilgas(pack) ? oilgas.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : tour.isTour(pack) ? tour.FAIL_REASONS : oilgas.isOilgas(pack) ? oilgas.FAIL_REASONS : waste.isWaste(pack) ? waste.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -364,7 +366,15 @@ export class DriverController {
                           'rated_t', l.rated_t, 'utilization', l.utilization, 'critical', l.critical, 'approved', l.approved_at IS NOT NULL, 'status', l.status,
                           'wind_limit_ms', coalesce(cs.wind_limit_ms, 9.8)) ORDER BY l.lift_time NULLS LAST, l.ref)
                      FROM ops.crane_lift l JOIN ops.equip_hire h ON h.id = l.hire_id LEFT JOIN ops.crane_spec cs ON cs.asset_id = h.asset_id
-                    WHERE l.task_id = t.id AND l.status <> 'canceled') AS lifts
+                    WHERE l.task_id = t.id AND l.status <> 'canceled') AS lifts,
+                  (SELECT jsonb_build_object('run_id', rn.id, 'points', COALESCE((
+                      SELECT jsonb_agg(jsonb_build_object('id', p.id, 'seq', p.seq, 'name', p.name, 'area', p.area, 'customer_name', cu.name, 'lat', p.lat, 'lng', p.lng, 'bins', p.bins,
+                               'note', p.note, 'event', m.event, 'bins_emptied', m.bins, 'reason', m.reason) ORDER BY p.seq)
+                        FROM ops.wst_point p LEFT JOIN crm.customer cu ON cu.id = p.customer_id
+                        LEFT JOIN LATERAL (SELECT x.event, x.bins, x.reason FROM ops.wst_visit x WHERE x.run_id = rn.id AND x.point_id = p.id ORDER BY x.occurred_at DESC LIMIT 1) m ON true
+                       WHERE p.route_id = rn.route_id AND (p.active OR m.event IS NOT NULL)), '[]'::jsonb),
+                      'tickets', (SELECT count(*) FROM ops.wst_dump d WHERE d.run_id = rn.id), 'net_kg', (SELECT coalesce(sum(d.net_kg), 0) FROM ops.wst_dump d WHERE d.run_id = rn.id))
+                     FROM ops.wst_run rn WHERE rn.task_id = t.id) AS waste
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE (t.status IN ('assigned','accepted','in_progress')
                    -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
@@ -390,7 +400,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board', 'student', 'lift'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board', 'student', 'lift', 'visit', 'dump'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -433,6 +443,11 @@ export class DriverController {
       // a crane lift done (with the wind speed read on site) or aborted (with the reason), cranes pack
       if (type === 'lift') return { ...base, type: 'lift' as const, lift_id: v.uuid(o.lift_id, `ops[${i}].lift_id`, { required: true })!,
         event: v.oneOf(o.event, `ops[${i}].event`, cranes.LIFT_EVENTS, { required: true })!, wind_ms: cranes.parseWind(o.wind_ms, `ops[${i}].wind_ms`) };
+      // a collection point emptied (bins) or missed (reason) on a waste round, and a tip at the landfill with the weighbridge ticket (waste pack)
+      if (type === 'visit') return { ...base, type: 'visit' as const, point_id: v.uuid(o.point_id, `ops[${i}].point_id`, { required: true })!,
+        event: v.oneOf(o.event, `ops[${i}].event`, waste.VISIT_EVENTS, { required: true })!, bins: v.int(o.bins, `ops[${i}].bins`, 0, 200), reason: v.oneOf(o.reason, `ops[${i}].reason`, waste.MISS_REASONS) };
+      if (type === 'dump') return { ...base, type: 'dump' as const, ticket_no: v.str(o.ticket_no, `ops[${i}].ticket_no`, { max: 40 })?.trim() || null,
+        facility: v.str(o.facility, `ops[${i}].facility`, { max: 120 })?.trim() || null, net_kg: waste.parseNetKg(o.net_kg, `ops[${i}].net_kg`) };
       // a temperature reading on a cold-chain route (coldchain pack), typed by the driver from the truck's display
       if (type === 'temp') return { ...base, type: 'temp' as const, reading_c: dist.celsius(o.reading_c, `ops[${i}].reading_c`), stop_task_id: v.uuid(o.stop_task_id, `ops[${i}].stop_task_id`) };
       if (type === 'ticket') {
@@ -603,6 +618,16 @@ export class DriverController {
           continue;
         }
 
+        if (op.type === 'visit' || op.type === 'dump') {
+          if (!waste.isWaste(t.sector_pack)) { reject('not_supported'); continue; }
+          const bad = op.type === 'visit'
+            ? await markVisit(c, a, { taskId: op.task_id, pointId: op.point_id, event: op.event, bins: op.bins, reason: op.reason, note: op.note, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id })
+            : await addDump(c, a, { taskId: op.task_id, ticketNo: op.ticket_no, facility: op.facility, netKg: op.net_kg, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id });
+          if (bad) { reject(bad, t.status); continue; }
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
+          continue;
+        }
+
         if (op.type === 'lift') {
           if (!equipment.isEquipment(t.sector_pack)) { reject('not_supported'); continue; }
           if (t.status !== 'in_progress') { reject('invalid_transition', t.status); continue; } // lifts happen during the working day
@@ -722,6 +747,10 @@ export class DriverController {
             if (bad) { reject(bad, t.status); continue; }
           }
         }
+        if (waste.isWaste(t.sector_pack) && op.to_status === 'completed') {
+          const bad = await wasteFinish(c, op.task_id); // every point marked, a weighbridge ticket if anything was collected
+          if (bad) { reject(bad, t.status); continue; }
+        }
         if (equipment.isEquipment(t.sector_pack) && op.to_status === 'completed') {
           const open = await liftsOpen(c, op.task_id);
           if (open) { reject(open, t.status); continue; }
@@ -832,11 +861,13 @@ type SyncOp =
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'student'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; student_id: string; event: school.MarkEvent; received_by: string | null }
   | { type: 'lift'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; lift_id: string; event: cranes.LiftEvent; wind_ms: number | null }
+  | { type: 'visit'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; point_id: string; event: waste.VisitEvent; bins: number | null; reason: waste.MissReason | null }
+  | { type: 'dump'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; ticket_no: string | null; facility: string | null; net_kg: number | null }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board', student: 'ops.sch_mark', lift: 'ops.crane_lift_event' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board', student: 'ops.sch_mark', lift: 'ops.crane_lift_event', visit: 'ops.wst_visit', dump: 'ops.wst_dump' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;

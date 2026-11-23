@@ -49,6 +49,7 @@ class DriverTask {
     this.shuttle,
     this.school,
     this.lifts,
+    this.waste,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -67,6 +68,8 @@ class DriverTask {
   final Map<String, dynamic>? school;
   /// Crane working days (cranes pack): the lift plans [{id, ref, time, description, load_t, radius_m, rated_t, utilization, critical, approved, status, wind_limit_ms}].
   final List<dynamic>? lifts;
+  /// Waste rounds (waste pack): {run_id, points: [{id, seq, name, area, customer_name, bins: [{type, count}], note, event, bins_emptied, reason}], tickets, net_kg}.
+  final Map<String, dynamic>? waste;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -84,10 +87,11 @@ class DriverTask {
         shuttle: _map(j['shuttle']),
         school: _map(j['school']),
         lifts: j['lifts'] is List ? j['lifts'] as List : null,
+        waste: _map(j['waste']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school, List<dynamic>? lifts}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school, List<dynamic>? lifts, Map<String, dynamic>? waste}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -103,6 +107,7 @@ class DriverTask {
         shuttle: shuttle ?? this.shuttle,
         school: school ?? this.school,
         lifts: lifts ?? this.lifts,
+        waste: waste ?? this.waste,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
@@ -142,6 +147,17 @@ class DriverTask {
   /// The lift plans of a crane working day (cranes pack); the day cannot end while one is planned.
   List<Lift> get liftList => [for (final x in lifts ?? const []) if (x is Map) Lift.fromJson(Map<String, dynamic>.from(x))];
   bool get liftsOpen => liftList.any((l) => l.status == 'planned');
+  /// A waste collection round (waste pack): the points to mark collected or missed and the weighbridge tickets.
+  bool get isWaste => sectorPack == 'waste@1';
+  List<WastePoint> get wastePoints => [for (final x in (waste?['points'] as List? ?? const [])) if (x is Map) WastePoint.fromJson(Map<String, dynamic>.from(x))];
+  int get wasteTickets => (waste?['tickets'] as num?)?.toInt() ?? 0;
+  /// Why the round cannot end yet: a point unmarked, or something collected without a weighbridge ticket.
+  String? get wasteFinishBlock {
+    final pts = wastePoints;
+    if (pts.any((p) => p.event == null)) return 'points_open';
+    if (wasteTickets == 0 && pts.any((p) => p.event == 'collected')) return 'dump_required';
+    return null;
+  }
   /// A tour bus (tour pack): the group boards (head count, odometer) → back (head count, odometer, a note when fewer) → done.
   bool get isTour => sectorPack == 'tour@1';
   List<Map<String, dynamic>> get itinerary => (attributes['itinerary'] as List? ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
@@ -226,7 +242,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -706,6 +722,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (tourActionLabels[a] ?? actionLabels[a]!)
                             : t.isOilgas
                             ? (oilgasActionLabels[a] ?? actionLabels[a]!)
+                            : t.isWaste
+                            ? (wasteActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -1054,7 +1072,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1150,6 +1168,15 @@ const rejectReasons = {
   'already_on_board': 'الطالب في الحافلة، سجّل نزوله أولًا',
   'meter_required': 'أدخل قراءة عدّاد الساعات',
   'lifts_open': 'سجّل كل رفعة منفذة أو موقوفة قبل إنهاء يوم العمل',
+  'points_open': 'سجّل كل نقطة جُمعت أو لم تُجمع قبل إنهاء الجولة',
+  'dump_required': 'سجّل تذكرة ميزان المردم قبل إنهاء الجولة',
+  'bins_required': 'أدخل عدد الحاويات المفرّغة',
+  'bins_invalid': 'عدد الحاويات أكثر من المسجّل للنقطة',
+  'miss_reason_required': 'اختر سبب عدم الجمع',
+  'unknown_point': 'النقطة ليست على هذا الخط، حدّث القائمة',
+  'ticket_required': 'أدخل رقم تذكرة الميزان',
+  'weight_required': 'أدخل الوزن الصافي',
+  'ticket_already_recorded': 'التذكرة مسجّلة مسبقًا',
   'lift_not_approved': 'رفعة حرجة لم تُعتمد بعد، لا تنفذها وتواصل مع المكتب',
   'wind_required': 'أدخل سرعة الرياح',
   'wind_too_high': 'الرياح فوق حد الرافعة، أوقف الرفعة',
@@ -1192,4 +1219,36 @@ class Lift {
   final double loadT, radiusM, ratedT, utilization, windLimit;
   final bool critical, approved;
   bool get blocked => critical && !approved;
+}
+
+const wasteActionLabels = {
+  TaskAction.accept: 'قبول الجولة',
+  TaskAction.start: 'بدأت الجولة',
+  TaskAction.complete: 'أنهيت الجولة',
+  TaskAction.fail: 'تعذّرت الجولة',
+};
+/// Same codes as the API (waste FAIL_REASONS).
+const wasteFailReasons = {
+  'vehicle_breakdown': 'عطل في الكابسة',
+  'accident': 'حادث',
+  'road_closed': 'الطريق مغلق',
+  'facility_closed': 'المردم مغلق',
+  'other': 'سبب آخر',
+};
+const wasteBinLabels = {'bin_120': 'حاوية 120 لتر', 'bin_240': 'حاوية 240 لتر', 'bin_660': 'حاوية 660 لتر', 'bin_1100': 'حاوية 1100 لتر', 'skip_6': 'سكيب 6 م³', 'skip_12': 'سكيب 12 م³', 'compactor': 'كابسة ثابتة', 'bag': 'أكياس'};
+const wasteMissReasons = {'no_access': 'لا يمكن الوصول', 'bins_not_out': 'الحاويات غير موجودة', 'blocked': 'مغلقة بسيارة أو عائق', 'contaminated': 'نفايات غير مطابقة', 'other': 'سبب آخر'};
+
+/// A collection point on a waste round: the customer's bins and where it stands (collected with bins emptied, or missed with a reason).
+class WastePoint {
+  WastePoint({required this.id, required this.seq, required this.name, this.area, this.customerName, this.bins = const [], this.note, this.event, this.binsEmptied, this.reason});
+  factory WastePoint.fromJson(Map<String, dynamic> j) => WastePoint(id: j['id'] as String, seq: (j['seq'] as num?)?.toInt() ?? 0, name: j['name'] as String? ?? '', area: j['area'] as String?,
+      customerName: j['customer_name'] as String?, note: j['note'] as String?, event: j['event'] as String?, binsEmptied: (j['bins_emptied'] as num?)?.toInt(), reason: j['reason'] as String?,
+      bins: [for (final b in (j['bins'] as List? ?? const [])) if (b is Map) (type: '${b['type']}', count: (b['count'] as num?)?.toInt() ?? 1)]);
+  final String id, name;
+  final int seq;
+  final String? area, customerName, note, event, reason;
+  final int? binsEmptied;
+  final List<({String type, int count})> bins;
+  int get binCount => bins.fold(0, (n, b) => n + b.count);
+  String get binsText => bins.map((b) => '${b.count} × ${wasteBinLabels[b.type] ?? b.type}').join('، ');
 }

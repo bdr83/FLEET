@@ -417,4 +417,19 @@ void main() {
     expect(t.copyWith(lifts: [{...t.lifts![1] as Map, 'status': 'aborted'}]).liftsOpen, false);
     expect(task('in_progress', pack: 'equipment@1').liftList, isEmpty);
   });
+
+  test('waste round: points marked, a ticket needed if anything was collected', () {
+    Map<String, dynamic> pt(String id, String? event) => {'id': id, 'seq': 1, 'name': id, 'bins': [{'type': 'bin_1100', 'count': 4}, {'type': 'bag', 'count': 2}], 'event': event};
+    final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'waste@1', 'attributes': {'address': 'السالمية'}, 'version': 1,
+      'waste': {'run_id': 'r', 'points': [pt('a', 'collected'), pt('b', null)], 'tickets': 0, 'net_kg': 0}});
+    expect((t.isWaste, t.address, t.wastePoints.length, t.wastePoints[0].binCount), (true, 'السالمية', 2, 6));
+    expect(t.wastePoints[0].binsText, '4 × حاوية 1100 لتر، 2 × أكياس');
+    expect(t.wasteFinishBlock, 'points_open');
+    final marked = t.copyWith(waste: {...t.waste!, 'points': [pt('a', 'collected'), pt('b', 'missed')]});
+    expect(marked.wasteFinishBlock, 'dump_required');
+    expect(marked.copyWith(waste: {...marked.waste!, 'tickets': 1}).wasteFinishBlock, isNull);
+    expect(nextActions(t), [TaskAction.complete, TaskAction.fail]);
+    expect(actionLabel(t, TaskAction.complete), 'أنهيت الجولة');
+    expect(failReasonsFor(t), wasteFailReasons);
+  });
 }
