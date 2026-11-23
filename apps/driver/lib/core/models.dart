@@ -50,6 +50,7 @@ class DriverTask {
     this.school,
     this.lifts,
     this.waste,
+    this.security,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -70,6 +71,8 @@ class DriverTask {
   final List<dynamic>? lifts;
   /// Waste rounds (waste pack): {run_id, points: [{id, seq, name, area, customer_name, bins: [{type, count}], note, event, bins_emptied, reason}], tickets, net_kg}.
   final Map<String, dynamic>? waste;
+  /// Patrols (security pack): {patrol_id, checkpoints: [{id, seq, name, note, event, reason}], incidents}.
+  final Map<String, dynamic>? security;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -88,10 +91,11 @@ class DriverTask {
         school: _map(j['school']),
         lifts: j['lifts'] is List ? j['lifts'] as List : null,
         waste: _map(j['waste']),
+        security: _map(j['security']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school, List<dynamic>? lifts, Map<String, dynamic>? waste}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school, List<dynamic>? lifts, Map<String, dynamic>? waste, Map<String, dynamic>? security}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -108,6 +112,7 @@ class DriverTask {
         school: school ?? this.school,
         lifts: lifts ?? this.lifts,
         waste: waste ?? this.waste,
+        security: security ?? this.security,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
@@ -150,6 +155,12 @@ class DriverTask {
   /// A waste collection round (waste pack): the points to mark collected or missed and the weighbridge tickets.
   bool get isWaste => sectorPack == 'waste@1';
   bool get isUtilities => sectorPack == 'utilities@1';
+  /// A guard patrol (security pack): the checkpoints to scan (with the tag on the spot) or skip with a reason, and incidents.
+  bool get isSecurity => sectorPack == 'security@1';
+  List<Checkpoint> get checkpointList => [for (final x in (security?['checkpoints'] as List? ?? const [])) if (x is Map) Checkpoint.fromJson(Map<String, dynamic>.from(x))];
+  int get incidentCount => (security?['incidents'] as num?)?.toInt() ?? 0;
+  /// Why the patrol cannot end yet: a checkpoint unmarked.
+  String? get securityFinishBlock => checkpointList.any((k) => k.event == null) ? 'checkpoints_open' : null;
   List<WastePoint> get wastePoints => [for (final x in (waste?['points'] as List? ?? const [])) if (x is Map) WastePoint.fromJson(Map<String, dynamic>.from(x))];
   int get wasteTickets => (waste?['tickets'] as num?)?.toInt() ?? 0;
   /// Why the round cannot end yet: a point unmarked, or something collected without a weighbridge ticket.
@@ -243,7 +254,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste || isUtilities ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste || isUtilities || isSecurity ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -785,6 +796,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (wasteActionLabels[a] ?? actionLabels[a]!)
                             : t.isUtilities
                             ? (utilitiesActionLabels[a] ?? actionLabels[a]!)
+                            : t.isSecurity
+                            ? (securityActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -1133,7 +1146,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isUtilities ? utilitiesFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isUtilities ? utilitiesFailReasons : t.isSecurity ? securityFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1253,6 +1266,13 @@ const rejectReasons = {
   'checks_failed': 'قائمة السلامة غير مكتملة، لا تبدأ العمل',
   'reinstatement_required': 'سجّل إعادة الطريق قبل إغلاق الأمر',
   'not_required': 'هذا الأمر لا يحتاج إعادة طريق',
+  'tag_required': 'أدخل رمز نقطة التفتيش',
+  'tag_mismatch': 'الرمز لا يطابق هذه النقطة، تأكد أنك عندها',
+  'skip_reason_required': 'اختر سبب عدم الفحص',
+  'unknown_checkpoint': 'النقطة ليست على هذا الموقع، حدّث القائمة',
+  'checkpoints_open': 'سجّل كل نقطة تفتيش مُسحت أو لم تُفحص قبل إنهاء الجولة',
+  'category_required': 'اختر نوع الحادث',
+  'description_required': 'اكتب وصف الحادث',
   'work_required': 'اكتب ما تم من عمل',
   'parts_invalid': 'تحقق من القطع والكميات',
   'vehicle_still_out': 'السيارة ما زالت مؤجرة لعميل آخر',
@@ -1317,4 +1337,32 @@ class WastePoint {
   final List<({String type, int count})> bins;
   int get binCount => bins.fold(0, (n, b) => n + b.count);
   String get binsText => bins.map((b) => '${b.count} × ${wasteBinLabels[b.type] ?? b.type}').join('، ');
+}
+
+const securityActionLabels = {
+  TaskAction.accept: 'قبول الجولة',
+  TaskAction.start: 'بدأت الجولة',
+  TaskAction.complete: 'أنهيت الجولة',
+  TaskAction.fail: 'تعذّرت الجولة',
+};
+/// Same codes as the API (security FAIL_REASONS).
+const securityFailReasons = {
+  'site_closed': 'الموقع مغلق',
+  'guard_unwell': 'الحارس متوعك',
+  'vehicle_breakdown': 'عطل في سيارة الدورية',
+  'emergency_elsewhere': 'طارئ في موقع آخر',
+  'other': 'سبب آخر',
+};
+const securitySkipReasons = {'no_access': 'لا يمكن الوصول', 'locked': 'مقفلة', 'unsafe': 'غير آمن', 'other': 'سبب آخر'};
+const incidentCategories = {'intrusion': 'تسلل', 'theft': 'سرقة', 'fire': 'حريق أو دخان', 'damage': 'ضرر أو عطل', 'suspicious': 'اشتباه', 'medical': 'حالة طبية', 'safety': 'خطر سلامة', 'other': 'أخرى'};
+const incidentSeverities = {'high': 'عالية', 'medium': 'متوسطة', 'low': 'منخفضة'};
+
+/// A checkpoint on a patrol and where it stands (scanned, or skipped with a reason). The tag itself is not sent to the app.
+class Checkpoint {
+  Checkpoint({required this.id, required this.seq, required this.name, this.note, this.event, this.reason});
+  factory Checkpoint.fromJson(Map<String, dynamic> j) => Checkpoint(id: j['id'] as String, seq: (j['seq'] as num?)?.toInt() ?? 0, name: j['name'] as String? ?? '',
+      note: j['note'] as String?, event: j['event'] as String?, reason: j['reason'] as String?);
+  final String id, name;
+  final int seq;
+  final String? note, event, reason;
 }

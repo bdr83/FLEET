@@ -293,6 +293,29 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Patrol: a checkpoint scanned (the tag typed or read on the spot, checked online at once) or skipped with a reason.
+  Future<String?> markCheckpoint(String taskId, String checkpointId, String event, {String? tag, String? reason, String? note}) async {
+    final p = await tracker.current();
+    final r = await _syncOp(taskId, {'type': 'scan', 'checkpoint_id': checkpointId, 'event': event, 'tag': ?tag, 'reason': ?reason, 'note': ?note,
+      if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (t) => t.copyWith(security: {
+          ...?t.security,
+          'checkpoints': [for (final x in (t.security?['checkpoints'] as List? ?? const [])) if (x is Map && x['id'] == checkpointId) {...x, 'event': event, 'reason': reason} else x],
+        }));
+    return null;
+  }
+
+  /// Patrol: an incident with its category, severity and description (sent at once, queued offline).
+  Future<String?> reportIncident(String taskId, {required String category, required String severity, required String description}) async {
+    final p = await tracker.current();
+    final r = await _syncOp(taskId, {'type': 'incident', 'category': category, 'severity': severity, 'note': description,
+      if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (t) => t.copyWith(security: {...?t.security, 'incidents': t.incidentCount + 1}));
+    return null;
+  }
+
   Future<String?> workEnd(String taskId, double meter, {double downtime = 0, required String signedBy}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_end', 'meter_hours': meter, 'downtime_hours': downtime, 'received_by': signedBy}, wait: true);
     if (r != null && !r.ok) return _refused(taskId, r);
