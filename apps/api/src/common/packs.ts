@@ -12,6 +12,7 @@ export const PACKS = [
   { code: 'school', sector: 10, label: 'النقل المدرسي' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين' },
   { code: 'taxi', sector: 12, label: 'التاكسي والليموزين' },
+  { code: 'tour', sector: 13, label: 'الحافلات السياحية والتأجير' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة' },
   { code: 'rental', sector: 17, label: 'تأجير السيارات' },

@@ -61,6 +61,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'school', sector: 10, label: 'النقل المدرسي', hint: 'خطوط صباحية وظهرية، طلاب وأولياء أمور، مشرفة، صعود ونزول وتسليم الطفل، بلاغات غياب، تنبيه طالب باقٍ في الحافلة' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
   { code: 'taxi', sector: 12, label: 'التاكسي والليموزين', hint: 'حجوزات فورية ومسبقة ورحلات مطار، فئات سيارات وتعرفة، وصول وركوب ونزول بالكيلومترات، حسابات شركات ونقد السائقين' },
+  { code: 'tour', sector: 13, label: 'الحافلات السياحية والتأجير', hint: 'رحلات مجموعات لمكاتب السياحة والمدارس والشركات، حافلة أو أكثر بسائقها طوال الرحلة، برنامج وكشف ركاب لرحلات الحدود، عدّ الركاب والعداد ذهابًا وعودة' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
   { code: 'rental', sector: 17, label: 'تأجير السيارات', hint: 'حجوزات وعقود إيجار، استلام وإرجاع بالعدّاد والوقود، رسوم الكيلومترات والوقود والأضرار، توصيل للعميل، المخالفات' },
@@ -298,6 +299,17 @@ export const TX_STATE: Record<string, { label: string; tone: string }> = {
   failed: { label: 'تعذّر', tone: 'danger' }, canceled: { label: 'ملغى', tone: 'muted' },
 };
 export const TX_FAIL: Record<string, string> = { passenger_no_show: 'الراكب لم يحضر', passenger_canceled: 'ألغى الراكب', vehicle_breakdown: 'عطل في السيارة', other: 'سبب آخر' };
+
+/** Tourist and charter buses (tour pack) labels. */
+export const TR_STATE: Record<string, { label: string; tone: string }> = {
+  planned: { label: 'مقاعد ناقصة', tone: 'warning' }, ready: { label: 'جاهزة', tone: 'info' }, under_way: { label: 'في الرحلة', tone: 'info' },
+  back: { label: 'عادت', tone: 'success' }, canceled: { label: 'ملغاة', tone: 'muted' },
+};
+export const TR_BUS: Record<string, { label: string; tone: string }> = {
+  assigned: { label: 'محجوزة', tone: 'info' }, accepted: { label: 'قبلها السائق', tone: 'info' }, in_progress: { label: 'في الرحلة', tone: 'info' },
+  completed: { label: 'عادت', tone: 'success' }, failed: { label: 'تعذّرت', tone: 'danger' }, canceled: { label: 'أُلغيت', tone: 'muted' },
+};
+export const TR_FAIL: Record<string, string> = { bus_breakdown: 'عطل في الحافلة', accident: 'حادث', border_refused: 'رُفض العبور', group_canceled: 'ألغت المجموعة', other: 'سبب آخر' };
 
 /** Heavy equipment hire (equipment pack) labels. */
 export const RATE_UNIT: Record<string, string> = { hour: 'بالساعة', day: 'باليوم', month: 'بالشهر' };

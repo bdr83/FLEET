@@ -31,12 +31,14 @@ import { markRider } from '../sectors/shuttle/shuttle.controller';
 import * as school from '../sectors/school/school';
 import * as taxi from '../sectors/taxi/taxi';
 import { taxiNoShow, taxiStage } from '../sectors/taxi/taxi.controller';
+import * as tour from '../sectors/tour/tour';
+import { tourStage } from '../sectors/tour/tour.controller';
 import { markStudent, schoolFinish } from '../sectors/school/school.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES, ...taxi.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES, ...taxi.STAGES, ...tour.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS, ...tour.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -62,6 +64,10 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
   if (service.isService(pack)) {
     const c = code as service.Stage;
     return (service.STAGES as readonly string[]).includes(code) ? { allowed: service.STAGE_ALLOWED[c], needs: service.STAGE_NEEDS[c] } : null;
+  }
+  if (tour.isTour(pack)) {
+    const c = code as tour.Stage;
+    return (tour.STAGES as readonly string[]).includes(code) ? { allowed: tour.STAGE_ALLOWED[c], needs: tour.STAGE_NEEDS[c] } : null;
   }
   if (taxi.isTaxi(pack)) {
     const c = code as taxi.Stage;
@@ -90,7 +96,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : tour.isTour(pack) ? tour.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -399,7 +405,9 @@ export class DriverController {
           // litres filled or discharged by a tanker (tankers@1)
           litres: v.int(o.litres, `ops[${i}].litres`, 0, 60000),
           // a taxi ride's drop (taxi@1): the trip km and how it was paid (checked by the pack)
-          trip_km: taxi.parseKm(o.trip_km, `ops[${i}].trip_km`), payment: v.oneOf(o.payment, `ops[${i}].payment`, taxi.PAYMENTS) };
+          trip_km: taxi.parseKm(o.trip_km, `ops[${i}].trip_km`), payment: v.oneOf(o.payment, `ops[${i}].payment`, taxi.PAYMENTS),
+          // a tour bus boarding or coming back (tour@1): the head count
+          headcount: v.int(o.headcount, `ops[${i}].headcount`, 0, 200) };
       }
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       // a rider boarded or absent on a staff-transport trip (shuttle pack)
@@ -446,7 +454,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack) || service.isService(t.sector_pack) || moving.isMoving(t.sector_pack) || containers.isContainers(t.sector_pack) || tankers.isTankers(t.sector_pack) || taxi.isTaxi(t.sector_pack))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack) || service.isService(t.sector_pack) || moving.isMoving(t.sector_pack) || containers.isContainers(t.sector_pack) || tankers.isTankers(t.sector_pack) || taxi.isTaxi(t.sector_pack) || tour.isTour(t.sector_pack))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -493,6 +501,10 @@ export class DriverController {
           }
           if (taxi.isTaxi(t.sector_pack)) {
             const bad = await taxiStage(c, op.task_id, op.code as taxi.Stage, { at: op.occurred_at, km: op.trip_km, payment: op.payment });
+            if (bad) { reject(bad, t.status); continue; }
+          }
+          if (tour.isTour(t.sector_pack)) {
+            const bad = await tourStage(c, op.task_id, op.code as tour.Stage, { at: op.occurred_at, headcount: op.headcount, odometer: op.odometer_km, note: op.note });
             if (bad) { reject(bad, t.status); continue; }
           }
           if (tankers.isTankers(t.sector_pack)) {
@@ -678,6 +690,10 @@ export class DriverController {
             if (bad) { reject(bad, t.status); continue; }
           }
         }
+        if (tour.isTour(t.sector_pack) && op.to_status === 'completed'
+          && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'tr_returned'`, [op.task_id])).rowCount) {
+          reject('proof_required', t.status); continue; // the trip ends with the head count and odometer on return
+        }
         if (school.isSchool(t.sector_pack) && op.to_status === 'completed') {
           const bad = await schoolFinish(c, op.task_id); // nobody left on the bus, every expected student marked
           if (bad) { reject(bad, t.status); continue; }
@@ -771,7 +787,7 @@ export class DriverController {
 type SyncOp =
   | { type: 'task_status'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; to_status: string; reason_code: string | null }
   | { type: 'milestone'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; code: string; lat: number | null; lng: number | null; odometer_km: number | null; fuel: number | null;
-      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null; result: string | null; parts: unknown; container_no: string | null; gate_ref: string | null; litres: number | null; trip_km: number | null; payment: string | null }
+      weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null; result: string | null; parts: unknown; container_no: string | null; gate_ref: string | null; litres: number | null; trip_km: number | null; payment: string | null; headcount: number | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'student'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; student_id: string; event: school.MarkEvent; received_by: string | null }

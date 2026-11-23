@@ -381,4 +381,16 @@ void main() {
       expect(DriverTask(id: 'x', status: 'accepted', sectorPack: 'freight@1', version: 1, attributes: const {}).isFreight, isFalse);
     });
   });
+
+  test('tour bus: board with heads and odometer, return, then done; the itinerary', () {
+    final t = task('in_progress', pack: 'tour@1', attrs: {'kind': 'tour', 'group_name': 'عمرة رجب', 'address': 'الجهراء', 'seats': 50,
+        'itinerary': [{'place': 'منفذ السالمي', 'at': '2026-12-01T06:00:00Z'}, {'place': 'مكة'}]});
+    expect((t.isTour, t.address, t.itinerary.length), (true, 'الجهراء', 2));
+    expect(nextActions(t), [TaskAction.trBoarded, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'tr_boarded')), [TaskAction.trReturned, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'tr_returned')), [TaskAction.complete]);
+    expect(nextActions(task('accepted', pack: 'tour@1')), [TaskAction.start]);
+    expect(failReasonsFor(t), tourFailReasons);
+    expect((parseCount('٤٨', 50), parseCount('51', 50), parseCount('1,200', 10000000), parseCount('x', 9)), (48, null, 1200, null));
+  });
 }
