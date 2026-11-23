@@ -184,6 +184,18 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isLandscape) ...[
+          Card(key: const Key('landscape-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${t.attributes['site_code'] ?? ''}${t.attributes['extra'] == true ? ' · زيارة إضافية' : ''}', style: text.labelMedium),
+            Text('${t.attributes['site_name'] ?? ''}', style: text.titleLarge),
+            if (t.attributes['customer_name'] != null) Text('${t.attributes['customer_name']}'),
+            Text('الخدمات: ${[for (final x in (t.attributes['services'] as List? ?? const [])) landscapeServiceLabels[x] ?? x].join('، ')}'),
+            Text('الطاقم: ${t.attributes['crew_size'] ?? '—'} عمال${t.attributes['area_m2'] != null ? ' · ${t.attributes['area_m2']} م²' : ''}${t.attributes['irrigation'] == true ? ' · فيها شبكة ري' : ''}'),
+            if (t.attributes['instructions'] != null) Text('${t.attributes['instructions']}', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+            if (t.attributes['contact_phone'] != null) Ltr('${t.attributes['contact_phone']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isOilgas) ...[
           Card(key: const Key('oilgas-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('${t.attributes['journey_ref'] ?? ''} · ${t.attributes['site_code'] ?? ''}', style: text.labelMedium),
@@ -511,6 +523,16 @@ class _ActionsState extends State<_Actions> {
         final hours = [for (final a in r.apps) for (final p in (task.attributes['products'] as List? ?? const [])) if (p is Map && p['id'] == a['product_id']) (p['reentry_hours'] as num?)?.toInt() ?? 0];
         final h = hours.isEmpty ? 0 : hours.reduce((x, y) => x > y ? x : y);
         toast(context, h > 0 ? 'سُجّل العلاج. أبلغ العميل: لا دخول قبل $h ساعات' : 'سُجّل العلاج');
+      case TaskAction.lsArrived:
+        final err = await s.landscapeStage(task.id, 'ls_arrived');
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.lsDone:
+        final r = await _landscapeForm(context);
+        if (r == null) return;
+        final err = await s.landscapeStage(task.id, 'ls_done', services: r.services, irrigation: r.irrigation, bags: r.bags, receivedBy: r.receivedBy, note: r.note);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, r.irrigation != null && r.irrigation != 'ok' && r.irrigation != 'not_checked' ? 'سُجّل العمل، وأُبلغ المكتب بعطل الري' : 'سُجّل العمل');
       case TaskAction.ogInspect:
         final checks = await _oilgasForm(context);
         if (checks == null) return;
@@ -801,6 +823,47 @@ class _ActionsState extends State<_Actions> {
                 apps: [for (final p in products) if (q(p['id'] as String) != null) {'product_id': p['id'], 'qty': q(p['id'] as String), if (where.text.trim().isNotEmpty) 'location': where.text.trim()}],
                 infestation: level!, receivedBy: by.text.trim(), note: note.text.trim().isEmpty ? null : note.text.trim())),
               child: const Text('تأكيد العلاج')),
+        ])),
+      )),
+    );
+  }
+
+  /// Garden visit done: the services carried out (the planned ones ticked to start with, marked with an icon), the irrigation state when the garden
+  /// has a network, the green waste bags, the receiver and a note (needed when a planned service was left undone).
+  Future<({List<String> services, String? irrigation, int bags, String? receivedBy, String? note})?> _landscapeForm(BuildContext context) {
+    final planned = [for (final x in (task.attributes['services'] as List? ?? const [])) '$x'];
+    final hasNet = task.attributes['irrigation'] == true;
+    final done = {...planned};
+    final bags = TextEditingController(), by = TextEditingController(), note = TextEditingController();
+    String? net;
+    bool undone() => planned.any((x) => !done.contains(x));
+    bool ok() => done.isNotEmpty && (!hasNet || net != null) && parseCount(bags.text, 500) != null && (!undone() || note.text.trim().isNotEmpty);
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('العمل المنجز', style: Theme.of(ctx).textTheme.titleLarge),
+          Wrap(spacing: 6, runSpacing: 4, children: [
+            for (final e in landscapeServiceLabels.entries)
+              FilterChip(key: Key('svc-${e.key}'), label: Text(e.value), selected: done.contains(e.key),
+                  avatar: planned.contains(e.key) ? const Icon(Icons.event_note, size: 16) : null,
+                  onSelected: (v) => set(() => v ? done.add(e.key) : done.remove(e.key))),
+          ]),
+          if (hasNet) ...[
+            const SizedBox(height: 8),
+            const Text('شبكة الري'),
+            Wrap(spacing: 6, children: [for (final e in irrigationLabels.entries) ChoiceChip(key: Key('net-${e.key}'), label: Text(e.value), selected: net == e.key, onSelected: (_) => set(() => net = e.key))]),
+          ],
+          TextField(key: const Key('ls-bags'), controller: bags, keyboardType: TextInputType.number, onChanged: (_) => set(() {}), decoration: const InputDecoration(labelText: 'أكياس المخلفات الخضراء')),
+          TextField(key: const Key('ls-by'), controller: by, maxLength: 120, decoration: const InputDecoration(labelText: 'اسم المستلم (اختياري)')),
+          TextField(key: const Key('ls-note'), controller: note, maxLength: 500, onChanged: (_) => set(() {}),
+              decoration: InputDecoration(labelText: undone() ? 'سبب عدم تنفيذ: ${[for (final x in planned) if (!done.contains(x)) landscapeServiceLabels[x] ?? x].join('، ')}' : 'ملاحظة للعميل والمكتب')),
+          FilledButton(key: const Key('ls-save'), onPressed: !ok() ? null : () => Navigator.pop(ctx, (
+                services: [for (final k in landscapeServiceLabels.keys) if (done.contains(k)) k], irrigation: net, bags: parseCount(bags.text, 500)!,
+                receivedBy: by.text.trim().isEmpty ? null : by.text.trim(), note: note.text.trim().isEmpty ? null : note.text.trim())),
+              child: const Text('تأكيد العمل')),
         ])),
       )),
     );

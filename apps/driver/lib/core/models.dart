@@ -159,6 +159,8 @@ class DriverTask {
   bool get isSecurity => sectorPack == 'security@1';
   /// A pest control visit (pest pack): arrived, then treated with the products used.
   bool get isPest => sectorPack == 'pest@1';
+  /// A garden maintenance visit (landscape pack): arrived, then the work done (services, irrigation, green waste).
+  bool get isLandscape => sectorPack == 'landscape@1';
   List<Checkpoint> get checkpointList => [for (final x in (security?['checkpoints'] as List? ?? const [])) if (x is Map) Checkpoint.fromJson(Map<String, dynamic>.from(x))];
   int get incidentCount => (security?['incidents'] as num?)?.toInt() ?? 0;
   /// Why the patrol cannot end yet: a checkpoint unmarked.
@@ -256,7 +258,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste || isUtilities || isSecurity || isPest ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste || isUtilities || isSecurity || isPest || isLandscape ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -330,7 +332,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned, ogInspect, ogDepart, ogCheckin, ogArrived, utArrived, utIsolate, utRestored, utReinstated, pcArrived, pcTreated }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned, ogInspect, ogDepart, ogCheckin, ogArrived, utArrived, utIsolate, utRestored, utReinstated, pcArrived, pcTreated, lsArrived, lsDone }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -348,6 +350,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isOilgas) return _oilgasActions(t);
   if (t.isUtilities) return _utilitiesActions(t);
   if (t.isPest) return _pestActions(t);
+  if (t.isLandscape) return _landscapeActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -803,6 +806,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (securityActionLabels[a] ?? actionLabels[a]!)
                             : t.isPest
                             ? (pestActionLabels[a] ?? actionLabels[a]!)
+                            : t.isLandscape
+                            ? (landscapeActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -1139,6 +1144,33 @@ const stageLabels = {
   'vehicle_back': 'أُرجعت المركبة',
   'load_checked': 'الحمولة جاهزة',
   'route_back': 'عاد للمستودع',
+  'work_start': 'بدأ العمل',
+  'work_end': 'انتهى العمل',
+  'handover': 'سُلّمت للعميل',
+  'collected': 'استُلمت من العميل',
+  'arrived': 'في الموقع',
+  'work_done': 'أُنجز العمل',
+  'ctr_picked': 'الحاوية معك',
+  'ctr_dropped': 'سُلّمت الحاوية',
+  'tank_filled': 'عُبّئ الصهريج',
+  'tank_discharged': 'فُرّغ الصهريج',
+  'tx_arrived': 'عند الراكب',
+  'tx_picked': 'الراكب معك',
+  'tx_dropped': 'أُنزل الراكب',
+  'tr_boarded': 'الركاب في الحافلة',
+  'tr_returned': 'عادت الرحلة',
+  'og_inspected': 'فُحصت المركبة',
+  'og_departed': 'انطلقت',
+  'og_checkin': 'أبلغت عن موقعك',
+  'og_arrived': 'وصلت الموقع',
+  'ut_arrived': 'في الموقع',
+  'ut_isolated': 'عُزل المرفق',
+  'ut_restored': 'أُعيدت الخدمة',
+  'ut_reinstated': 'أُعيد الشارع كما كان',
+  'pc_arrived': 'في الموقع',
+  'pc_treated': 'عولج',
+  'ls_arrived': 'في الحديقة',
+  'ls_done': 'أُنجز العمل',
 };
 
 /// Same codes as the API (staffing FAIL_REASONS).
@@ -1151,7 +1183,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isUtilities ? utilitiesFailReasons : t.isSecurity ? securityFailReasons : t.isPest ? pestFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isUtilities ? utilitiesFailReasons : t.isSecurity ? securityFailReasons : t.isPest ? pestFailReasons : t.isLandscape ? landscapeFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1280,6 +1312,11 @@ const rejectReasons = {
   'description_required': 'اكتب وصف الحادث',
   'infestation_required': 'اختر مستوى الإصابة',
   'products_required': 'سجّل المبيدات المستخدمة وكمياتها',
+  'services_required': 'اختر الخدمات التي نُفذت',
+  'services_invalid': 'تحقق من الخدمات المختارة',
+  'undone_note_required': 'خدمة مخططة لم تُنفذ، اكتب السبب في الملاحظة',
+  'irrigation_required': 'اختر حالة شبكة الري',
+  'waste_bags_required': 'اكتب عدد أكياس المخلفات (0 إن لم توجد)',
   'products_invalid': 'تحقق من المبيدات والكميات',
   'unknown_product': 'مبيد غير موجود في السجل، حدّث القائمة',
   'work_required': 'اكتب ما تم من عمل',
@@ -1415,3 +1452,44 @@ const pestServiceLabels = {'spray': 'رش', 'gel': 'جل', 'bait': 'طعوم', '
 const pestPremisesLabels = {'home': 'منزل', 'restaurant': 'مطعم', 'office': 'مكتب', 'warehouse': 'مستودع', 'hospital': 'مستشفى أو عيادة', 'school': 'مدرسة', 'other': 'أخرى'};
 const pestUnitLabels = {'ml': 'مل', 'l': 'لتر', 'g': 'غرام', 'kg': 'كغ', 'unit': 'قطعة'};
 const infestationLabels = {'none': 'لا إصابة', 'low': 'خفيفة', 'medium': 'متوسطة', 'high': 'شديدة'};
+
+/// Garden maintenance visit: accept → start (on the way) → arrived → work done (services, irrigation, green waste) → done.
+List<TaskAction> _landscapeActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        'ls_done' => [TaskAction.complete],
+        'ls_arrived' => [TaskAction.lsDone, TaskAction.fail],
+        _ => [TaskAction.lsArrived, TaskAction.fail],
+      };
+    default:
+      return [];
+  }
+}
+
+const landscapeActionLabels = {
+  TaskAction.accept: 'قبول الزيارة',
+  TaskAction.start: 'انطلقت للحديقة',
+  TaskAction.lsArrived: 'وصلت الحديقة',
+  TaskAction.lsDone: 'تسجيل العمل المنجز',
+  TaskAction.complete: 'إنهاء الزيارة',
+  TaskAction.fail: 'تعذّرت الزيارة',
+};
+/// Same codes as the API (landscape FAIL_REASONS).
+const landscapeFailReasons = {
+  'no_access': 'تعذّر الدخول',
+  'customer_canceled': 'العميل ألغى',
+  'weather': 'الطقس (غبار، أمطار، حر شديد)',
+  'vehicle_breakdown': 'عطل في المركبة',
+  'other': 'سبب آخر',
+};
+/// Same codes and order as the API (landscape SERVICES).
+const landscapeServiceLabels = {
+  'mowing': 'قص العشب', 'pruning': 'تقليم', 'irrigation': 'صيانة الري', 'fertilizing': 'تسميد', 'planting': 'زراعة', 'weeding': 'إزالة الحشائش',
+  'palm_care': 'خدمة النخيل', 'pest_spray': 'رش مبيد زراعي', 'cleanup': 'تنظيف', 'other': 'أخرى',
+};
+const irrigationLabels = {'ok': 'سليمة', 'leak': 'تسريب', 'broken': 'عطل', 'dry_area': 'منطقة جافة', 'not_checked': 'لم تُفحص'};
