@@ -70,6 +70,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
   { code: 'service', sector: 22, label: 'الصيانة الفنية', hint: 'بلاغات صيانة بأولوية وموعد استجابة، زيارات الفنيين، القطع المستخدمة، الصيانة الدورية' },
+  { code: 'waste', sector: 23, label: 'جمع النفايات والتنظيف', hint: 'خطوط جمع ثابتة لكابسات النفايات، نقاط جمع بحاويات العملاء، جولات يومية، تسجيل كل نقطة جُمعت أو لم تُجمع بسبب، تذاكر ميزان المردم والأطنان' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -328,6 +329,13 @@ export const OG_PURPOSE: Record<string, string> = { crew: 'نقل طاقم', equ
 export const OG_FAIL: Record<string, string> = { vehicle_breakdown: 'عطل', inspection_failed: 'لم تجتز الفحص', site_closed: 'الموقع مغلق', gate_refused: 'رُفض الدخول', weather: 'الطقس', accident: 'حادث', other: 'سبب آخر' };
 export const OG_CHECK: Record<string, string> = { tyres: 'الإطارات', brakes: 'الفرامل', lights: 'الأضواء', seat_belts: 'أحزمة الأمان', fire_extinguisher: 'طفاية الحريق', first_aid: 'الإسعاف', spill_kit: 'عدة الانسكاب', h2s_monitor: 'كاشف H2S' };
 
+/** Waste collection (waste pack) labels. */
+export const WS_TYPE: Record<string, string> = { general: 'نفايات عامة', recyclable: 'قابلة للتدوير', construction: 'مخلفات بناء', green: 'مخلفات زراعية', organic: 'عضوية' };
+export const WS_BIN: Record<string, string> = { bin_120: 'حاوية 120 لتر', bin_240: 'حاوية 240 لتر', bin_660: 'حاوية 660 لتر', bin_1100: 'حاوية 1100 لتر', skip_6: 'سكيب 6 م³', skip_12: 'سكيب 12 م³', compactor: 'كابسة ثابتة', bag: 'أكياس' };
+export const WS_MISS: Record<string, string> = { no_access: 'لا يمكن الوصول', bins_not_out: 'الحاويات غير موجودة', blocked: 'مغلقة بسيارة أو عائق', contaminated: 'نفايات غير مطابقة', other: 'سبب آخر' };
+export const WS_EVENT: Record<string, { label: string; tone: string }> = { collected: tone('جُمعت', 'success'), missed: tone('لم تُجمع', 'danger') };
+export const WS_FAIL: Record<string, string> = { facility_closed: 'المردم مغلق' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(WS_FAIL).filter(([k]) => !(k in FAIL_REASON))));
 /** Cranes and lifting (cranes pack) labels. */
 export const CR_STATUS: Record<string, { label: string; tone: string }> = {
   planned: tone('مخططة', 'info'), done: tone('نُفذت', 'success'), aborted: tone('أُوقفت', 'danger'), canceled: tone('ملغاة'),

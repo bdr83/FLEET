@@ -27,6 +27,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/shuttle', label: 'نقل الموظفين', perm: 'tasks:read', pack: 'shuttle' },
   { href: '/equipment', label: 'تأجير المعدات', perm: 'tasks:read', pack: 'equipment|cranes' },
   { href: '/cranes', label: 'الرافعات', perm: 'tasks:read', pack: 'cranes' },
+  { href: '/waste', label: 'جمع النفايات', perm: 'tasks:read', pack: 'waste' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
   { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/moving', label: 'نقل الأثاث', perm: 'tasks:read', pack: 'moving' },

@@ -276,6 +276,23 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Waste round: a point collected (bins emptied) or missed (reason); shown at once and queued offline, the last mark counts.
+  Future<void> markVisit(String taskId, String pointId, String event, {int? bins, String? reason}) async {
+    _local(taskId, (t) => t.copyWith(waste: {
+          ...?t.waste,
+          'points': [for (final x in (t.waste?['points'] as List? ?? const [])) if (x is Map && x['id'] == pointId) {...x, 'event': event, 'bins_emptied': bins, 'reason': reason} else x],
+        }));
+    await _syncOp(taskId, {'type': 'visit', 'point_id': pointId, 'event': event, 'bins': ?bins, 'reason': ?reason});
+  }
+
+  /// Waste round: a tip at the landfill with the weighbridge ticket and the net weight (checked online at once when possible).
+  Future<String?> addDump(String taskId, {required String ticketNo, required double netKg, String? facility}) async {
+    final r = await _syncOp(taskId, {'type': 'dump', 'ticket_no': ticketNo, 'net_kg': netKg, 'facility': ?facility}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (t) => t.copyWith(waste: {...?t.waste, 'tickets': t.wasteTickets + 1, 'net_kg': ((t.waste?['net_kg'] as num?) ?? 0) + netKg}));
+    return null;
+  }
+
   Future<String?> workEnd(String taskId, double meter, {double downtime = 0, required String signedBy}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'work_end', 'meter_hours': meter, 'downtime_hours': downtime, 'received_by': signedBy}, wait: true);
     if (r != null && !r.ok) return _refused(taskId, r);
