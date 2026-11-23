@@ -294,6 +294,15 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Oilfield journey: a stage checked online at once (the inspection with its checklist, the departure needs the plan approved).
+  Future<String?> oilgasStage(String taskId, String code, {Map<String, bool>? checks}) async {
+    final p = await tracker.current();
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': code, 'checks': ?checks, if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(stage: code));
+    return null;
+  }
+
   /// Tour bus: the group on board, with the head count and the odometer (checked online at once against the seats).
   Future<String?> tourBoarded(String taskId, {required int headcount, required int odometer}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tr_boarded', 'headcount': headcount, 'odometer_km': odometer}, wait: true);

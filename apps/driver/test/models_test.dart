@@ -393,4 +393,16 @@ void main() {
     expect(failReasonsFor(t), tourFailReasons);
     expect((parseCount('٤٨', 50), parseCount('51', 50), parseCount('1,200', 10000000), parseCount('x', 9)), (48, null, 1200, null));
   });
+
+  test('oilfield journey: inspect, depart, call in, arrive', () {
+    final t = task('in_progress', pack: 'oilgas@1', attrs: {'kind': 'journey', 'address': 'مركز تجميع 1، برقان', 'h2s_zone': true});
+    expect((t.isOilgas, t.address), (true, 'مركز تجميع 1، برقان'));
+    expect(nextActions(t), [TaskAction.ogInspect, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'og_inspected')), [TaskAction.ogDepart, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'og_departed')), [TaskAction.ogCheckin, TaskAction.ogArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'og_checkin')), [TaskAction.ogCheckin, TaskAction.ogArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'og_arrived')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.ogCheckin), 'بلاغ: الوضع سليم');
+    expect(failReasonsFor(t), oilgasFailReasons);
+  });
 }
