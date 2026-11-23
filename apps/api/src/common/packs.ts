@@ -9,6 +9,7 @@ export const PACKS = [
   { code: 'tankers', sector: 7, label: 'صهاريج المياه والديزل والوقود' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية' },
+  { code: 'school', sector: 10, label: 'النقل المدرسي' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة' },

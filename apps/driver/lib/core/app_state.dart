@@ -202,6 +202,16 @@ class AppState extends ChangeNotifier {
     await _syncOp(taskId, {'type': 'board', 'rider_id': riderId, 'event': event});
   }
 
+  /// School transport: marks a student boarded, absent or dropped (shown at once, queued offline; the last mark counts).
+  /// A young child going home is dropped with the name of the adult who took them.
+  Future<void> markStudent(String taskId, String studentId, String event, {String? receivedBy}) async {
+    _local(taskId, (t) => t.copyWith(school: {
+          ...?t.school,
+          'students': [for (final x in t.students) x.id == studentId ? {...x.toJson(), 'event': event, 'received_by': receivedBy} : x.toJson()],
+        }));
+    await _syncOp(taskId, {'type': 'student', 'student_id': studentId, 'event': event, 'received_by': ?receivedBy});
+  }
+
   /// Cold chain: a temperature reading on the route, typed from the truck's display (queued offline like any op).
   Future<String?> tempReading(String routeTaskId, double celsius) async {
     final r = await _syncOp(routeTaskId, {'type': 'temp', 'reading_c': celsius}, wait: true);

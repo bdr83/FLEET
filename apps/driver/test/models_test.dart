@@ -306,6 +306,25 @@ void main() {
     expect(parseLitres('1.5'), isNull);
   });
 
+  test('school trip: students marked; the trip ends with nobody on the bus and everyone marked', () {
+    final t = task('in_progress', pack: 'school@1', attrs: {'kind': 'attend', 'direction': 'from_school', 'school_name': 'مدرسة النور'});
+    expect((t.isSchool, t.toSchool, t.isAttendant), (true, false, true));
+    final kids = [
+      {'id': 'a', 'name': 'سارة', 'stop_seq': 1, 'handover': true, 'event': 'boarded'},
+      {'id': 'b', 'name': 'عبدالله', 'stop_seq': 1},
+      {'id': 'c', 'name': 'نورة', 'stop_seq': 2, 'excused': true},
+    ];
+    var x = t.copyWith(school: {'students': kids});
+    expect(x.students.map((s) => s.state).toList(), ['on_board', 'waiting', 'excused']);
+    expect(x.schoolFinishBlock, 'students_on_board');
+    x = t.copyWith(school: {'students': [{...kids[0], 'event': 'dropped', 'received_by': 'أم سارة'}, kids[1], kids[2]]});
+    expect(x.schoolFinishBlock, 'students_unmarked');
+    x = t.copyWith(school: {'students': [{...kids[0], 'event': 'dropped'}, {...kids[1], 'event': 'absent'}, kids[2]]});
+    expect(x.schoolFinishBlock, isNull);
+    expect(actionLabel(t, TaskAction.complete), 'وصلت وأنهيت الرحلة');
+    expect(failReasonsFor(t), schoolFailReasons);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');
