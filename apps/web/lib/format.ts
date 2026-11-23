@@ -71,6 +71,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
   { code: 'service', sector: 22, label: 'الصيانة الفنية', hint: 'بلاغات صيانة بأولوية وموعد استجابة، زيارات الفنيين، القطع المستخدمة، الصيانة الدورية' },
   { code: 'waste', sector: 23, label: 'جمع النفايات والتنظيف', hint: 'خطوط جمع ثابتة لكابسات النفايات، نقاط جمع بحاويات العملاء، جولات يومية، تسجيل كل نقطة جُمعت أو لم تُجمع بسبب، تذاكر ميزان المردم والأطنان' },
+  { code: 'utilities', sector: 24, label: 'المرافق: الكهرباء والماء والاتصالات', hint: 'أوامر عمل ميدانية بأولوية وموعد استجابة، فرق بسيارة وقائد، تصاريح الحفر، العزل وقائمة السلامة، الإصلاح وإعادة الطريق، زمن الاستجابة والانقطاع' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -329,6 +330,18 @@ export const OG_PURPOSE: Record<string, string> = { crew: 'نقل طاقم', equ
 export const OG_FAIL: Record<string, string> = { vehicle_breakdown: 'عطل', inspection_failed: 'لم تجتز الفحص', site_closed: 'الموقع مغلق', gate_refused: 'رُفض الدخول', weather: 'الطقس', accident: 'حادث', other: 'سبب آخر' };
 export const OG_CHECK: Record<string, string> = { tyres: 'الإطارات', brakes: 'الفرامل', lights: 'الأضواء', seat_belts: 'أحزمة الأمان', fire_extinguisher: 'طفاية الحريق', first_aid: 'الإسعاف', spill_kit: 'عدة الانسكاب', h2s_monitor: 'كاشف H2S' };
 
+/** Utilities field work (utilities pack) labels. */
+export const UT_NETWORK: Record<string, string> = { electricity: 'كهرباء', water: 'ماء', telecom: 'اتصالات' };
+export const UT_TYPE: Record<string, string> = { outage: 'انقطاع', repair: 'إصلاح', connection: 'توصيل جديد', meter: 'عدّاد', inspection: 'فحص', excavation: 'حفر' };
+export const UT_PRIORITY: Record<string, { label: string; tone: string }> = { emergency: tone('طارئ', 'danger'), urgent: tone('عاجل', 'warning'), planned: tone('مجدول', 'info') };
+export const UT_STATE: Record<string, { label: string; tone: string }> = {
+  open: tone('بلا فرقة', 'warning'), assigned: tone('مسند', 'info'), en_route: tone('في الطريق', 'primary'), on_site: tone('في الموقع', 'primary'), isolated: tone('معزول، جارٍ العمل', 'primary'),
+  restored: tone('أُصلح', 'success'), done: tone('مغلق', 'success'), failed: tone('تعذّر', 'danger'), canceled: tone('ملغى'),
+};
+export const UT_RESULT: Record<string, string> = { fixed: 'أُصلح نهائيًا', follow_up: 'إصلاح مؤقت يحتاج متابعة', not_fixed: 'لم يُصلح، أُحيل' };
+export const UT_CHECK: Record<string, string> = { isolation: 'العزل والقفل', ppe: 'معدات الوقاية', barriers: 'الحواجز واللوحات', permit_on_site: 'التصريح في الموقع' };
+export const UT_FAIL: Record<string, string> = { no_access: 'لا يمكن الوصول', permit_refused: 'رُفض التصريح', materials_missing: 'نقص مواد', site_unsafe: 'الموقع غير آمن' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(UT_FAIL).filter(([k]) => !(k in FAIL_REASON))));
 /** Waste collection (waste pack) labels. */
 export const WS_TYPE: Record<string, string> = { general: 'نفايات عامة', recyclable: 'قابلة للتدوير', construction: 'مخلفات بناء', green: 'مخلفات زراعية', organic: 'عضوية' };
 export const WS_BIN: Record<string, string> = { bin_120: 'حاوية 120 لتر', bin_240: 'حاوية 240 لتر', bin_660: 'حاوية 660 لتر', bin_1100: 'حاوية 1100 لتر', skip_6: 'سكيب 6 م³', skip_12: 'سكيب 12 م³', compactor: 'كابسة ثابتة', bag: 'أكياس' };

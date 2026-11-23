@@ -39,12 +39,14 @@ import * as cranes from '../sectors/cranes/cranes';
 import { liftsOpen, markLift } from '../sectors/cranes/cranes.controller';
 import * as waste from '../sectors/waste/waste';
 import { addDump, markVisit, wasteFinish } from '../sectors/waste/waste.controller';
+import * as utilities from '../sectors/utilities/utilities';
+import { utilitiesFinish, utilitiesStage } from '../sectors/utilities/utilities.controller';
 import { markStudent, schoolFinish } from '../sectors/school/school.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
-const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES, ...taxi.STAGES, ...tour.STAGES, ...oilgas.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS, ...tour.FAIL_REASONS, ...oilgas.FAIL_REASONS, ...waste.FAIL_REASONS])];
+const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES, ...taxi.STAGES, ...tour.STAGES, ...oilgas.STAGES, ...utilities.STAGES])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS, ...taxi.FAIL_REASONS, ...tour.FAIL_REASONS, ...oilgas.FAIL_REASONS, ...waste.FAIL_REASONS, ...utilities.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -74,6 +76,10 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
   if (oilgas.isOilgas(pack)) {
     const c = code as oilgas.Stage;
     return (oilgas.STAGES as readonly string[]).includes(code) ? { allowed: oilgas.STAGE_ALLOWED[c], needs: oilgas.STAGE_NEEDS[c] } : null;
+  }
+  if (utilities.isUtilities(pack)) {
+    const c = code as utilities.Stage;
+    return (utilities.STAGES as readonly string[]).includes(code) ? { allowed: utilities.STAGE_ALLOWED[c], needs: utilities.STAGE_NEEDS[c] } : null;
   }
   if (tour.isTour(pack)) {
     const c = code as tour.Stage;
@@ -106,7 +112,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : tour.isTour(pack) ? tour.FAIL_REASONS : oilgas.isOilgas(pack) ? oilgas.FAIL_REASONS : waste.isWaste(pack) ? waste.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : taxi.isTaxi(pack) ? taxi.FAIL_REASONS : tour.isTour(pack) ? tour.FAIL_REASONS : oilgas.isOilgas(pack) ? oilgas.FAIL_REASONS : waste.isWaste(pack) ? waste.FAIL_REASONS : utilities.isUtilities(pack) ? utilities.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -487,7 +493,7 @@ export class DriverController {
           if (rule.needs && !(await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, rule.needs])).rowCount) {
             reject('stage_out_of_order', t.status); continue;
           }
-          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack) || service.isService(t.sector_pack) || moving.isMoving(t.sector_pack) || containers.isContainers(t.sector_pack) || tankers.isTankers(t.sector_pack) || taxi.isTaxi(t.sector_pack) || tour.isTour(t.sector_pack) || (oilgas.isOilgas(t.sector_pack) && !oilgas.REPEATABLE.includes(op.code)))
+          if ((concrete.isConcrete(t.sector_pack) || staffing.isStaffing(t.sector_pack) || internal.isInternal(t.sector_pack) || dist.isDistribution(t.sector_pack) || freight.isFreight(t.sector_pack) || equipment.isEquipment(t.sector_pack) || rental.isRental(t.sector_pack) || service.isService(t.sector_pack) || moving.isMoving(t.sector_pack) || containers.isContainers(t.sector_pack) || tankers.isTankers(t.sector_pack) || taxi.isTaxi(t.sector_pack) || tour.isTour(t.sector_pack) || utilities.isUtilities(t.sector_pack) || (oilgas.isOilgas(t.sector_pack) && !oilgas.REPEATABLE.includes(op.code)))
             && (await c.query('SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = $2', [op.task_id, op.code])).rowCount) {
             reject('stage_already_recorded', t.status); continue;
           }
@@ -539,6 +545,10 @@ export class DriverController {
           }
           if (oilgas.isOilgas(t.sector_pack)) {
             const bad = await oilgasStage(c, a, op.task_id, op.code as oilgas.Stage, { at: op.occurred_at, checks: op.checks, clientOpId: op.client_op_id });
+            if (bad) { reject(bad, t.status); continue; }
+          }
+          if (utilities.isUtilities(t.sector_pack)) {
+            const bad = await utilitiesStage(c, op.task_id, op.code as utilities.Stage, { at: op.occurred_at, checks: op.checks, result: op.result, note: op.note });
             if (bad) { reject(bad, t.status); continue; }
           }
           if (tour.isTour(t.sector_pack)) {
@@ -746,6 +756,10 @@ export class DriverController {
             const bad = await taxiNoShow(c, op.task_id, op.occurred_at, taxi.NO_SHOW_WAIT_MIN); // only after arriving and waiting
             if (bad) { reject(bad, t.status); continue; }
           }
+        }
+        if (utilities.isUtilities(t.sector_pack) && op.to_status === 'completed') {
+          const bad = await utilitiesFinish(c, op.task_id); // repaired, and the road reinstated when digging
+          if (bad) { reject(bad, t.status); continue; }
         }
         if (waste.isWaste(t.sector_pack) && op.to_status === 'completed') {
           const bad = await wasteFinish(c, op.task_id); // every point marked, a weighbridge ticket if anything was collected

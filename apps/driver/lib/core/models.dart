@@ -149,6 +149,7 @@ class DriverTask {
   bool get liftsOpen => liftList.any((l) => l.status == 'planned');
   /// A waste collection round (waste pack): the points to mark collected or missed and the weighbridge tickets.
   bool get isWaste => sectorPack == 'waste@1';
+  bool get isUtilities => sectorPack == 'utilities@1';
   List<WastePoint> get wastePoints => [for (final x in (waste?['points'] as List? ?? const [])) if (x is Map) WastePoint.fromJson(Map<String, dynamic>.from(x))];
   int get wasteTickets => (waste?['tickets'] as num?)?.toInt() ?? 0;
   /// Why the round cannot end yet: a point unmarked, or something collected without a weighbridge ticket.
@@ -242,7 +243,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour || isOilgas || isWaste || isUtilities ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -316,7 +317,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned, ogInspect, ogDepart, ogCheckin, ogArrived }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned, ogInspect, ogDepart, ogCheckin, ogArrived, utArrived, utIsolate, utRestored, utReinstated }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -332,6 +333,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isTaxi) return _taxiActions(t);
   if (t.isTour) return _tourActions(t);
   if (t.isOilgas) return _oilgasActions(t);
+  if (t.isUtilities) return _utilitiesActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -549,6 +551,63 @@ List<TaskAction> _oilgasActions(DriverTask t) {
   }
 }
 
+/// Utilities work order: accept → start (en route) → arrived → isolated (safety checklist; a dig needs a valid permit)
+/// → restored (with the result) → reinstated (digs only) → done.
+List<TaskAction> _utilitiesActions(DriverTask t) {
+  final dig = t.attributes['needs_permit'] == true;
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        'ut_reinstated' => [TaskAction.complete],
+        'ut_restored' => dig ? [TaskAction.utReinstated] : [TaskAction.complete],
+        'ut_isolated' => [TaskAction.utRestored, TaskAction.fail],
+        'ut_arrived' => [TaskAction.utIsolate, TaskAction.fail],
+        _ => [TaskAction.utArrived, TaskAction.fail],
+      };
+    default:
+      return [];
+  }
+}
+
+const utilitiesActionLabels = {
+  TaskAction.accept: 'قبول أمر العمل',
+  TaskAction.start: 'انطلقت للموقع',
+  TaskAction.utArrived: 'وصلت الموقع',
+  TaskAction.utIsolate: 'العزل وقائمة السلامة',
+  TaskAction.utRestored: 'تم الإصلاح',
+  TaskAction.utReinstated: 'أُعيد الطريق',
+  TaskAction.complete: 'إغلاق أمر العمل',
+  TaskAction.fail: 'تعذّر العمل',
+};
+
+/// Same codes as the API (utilities FAIL_REASONS).
+const utilitiesFailReasons = {
+  'vehicle_breakdown': 'عطل في المركبة',
+  'no_access': 'تعذّر الوصول للموقع',
+  'permit_refused': 'رُفض التصريح أو أُوقف الحفر',
+  'materials_missing': 'نقص في المواد',
+  'site_unsafe': 'الموقع غير آمن',
+  'other': 'سبب آخر',
+};
+
+/// The safety checklist before work, same items as the API (utilities CHECKS); the permit on site only when digging.
+const utilitiesChecks = {
+  'isolation': 'العزل والقفل (Lock-out) تم',
+  'ppe': 'معدات الحماية الشخصية',
+  'barriers': 'الحواجز واللوحات التحذيرية',
+  'permit_on_site': 'تصريح الحفر في الموقع',
+};
+
+/// The repair result, same codes as the API.
+const utilitiesResults = {'fixed': 'تم الإصلاح نهائيًا', 'follow_up': 'إصلاح مؤقت، يحتاج متابعة', 'not_fixed': 'لم يُصلح'};
+const utNetworkLabels = {'electricity': 'كهرباء', 'water': 'ماء', 'telecom': 'اتصالات'};
+const utTypeLabels = {'outage': 'انقطاع', 'repair': 'إصلاح', 'connection': 'توصيل جديد', 'meter': 'عدّاد', 'inspection': 'فحص', 'excavation': 'حفر'};
+const utPriorityLabels = {'emergency': 'طارئ', 'urgent': 'عاجل', 'planned': 'مجدول'};
+
 const oilgasActionLabels = {
   TaskAction.accept: 'قبول الرحلة',
   TaskAction.start: 'بدء الرحلة',
@@ -724,6 +783,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (oilgasActionLabels[a] ?? actionLabels[a]!)
                             : t.isWaste
                             ? (wasteActionLabels[a] ?? actionLabels[a]!)
+                            : t.isUtilities
+                            ? (utilitiesActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -1072,7 +1133,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isOilgas ? oilgasFailReasons : t.isWaste ? wasteFailReasons : t.isUtilities ? utilitiesFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1187,6 +1248,11 @@ const rejectReasons = {
   'meter_invalid': 'قراءة الانتهاء يجب أن تكون بعد قراءة البدء وخلال 24 ساعة',
   'signer_required': 'اكتب اسم مشرف الموقع',
   'result_required': 'اختر نتيجة الزيارة',
+  'permit_required': 'لا عزل ولا حفر بلا تصريح حفر، تواصل مع المكتب',
+  'permit_expired': 'تصريح الحفر منتهٍ، لا تبدأ العمل وتواصل مع المكتب',
+  'checks_failed': 'قائمة السلامة غير مكتملة، لا تبدأ العمل',
+  'reinstatement_required': 'سجّل إعادة الطريق قبل إغلاق الأمر',
+  'not_required': 'هذا الأمر لا يحتاج إعادة طريق',
   'work_required': 'اكتب ما تم من عمل',
   'parts_invalid': 'تحقق من القطع والكميات',
   'vehicle_still_out': 'السيارة ما زالت مؤجرة لعميل آخر',

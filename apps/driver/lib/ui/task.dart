@@ -156,6 +156,22 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isUtilities) ...[
+          Card(key: const Key('utilities-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${t.attributes['job_ref'] ?? ''} · ${utNetworkLabels[t.attributes['network']] ?? ''} · ${utTypeLabels[t.attributes['job_type']] ?? ''}', style: text.labelMedium),
+            Text('${t.attributes['description'] ?? ''}', style: text.titleLarge),
+            Text('الأولوية: ${utPriorityLabels[t.attributes['priority']] ?? '—'}', key: const Key('ut-priority'),
+                style: t.attributes['priority'] == 'emergency' ? text.titleSmall?.copyWith(color: Theme.of(context).colorScheme.error) : null),
+            if (t.attributes['due_at'] != null) Text('الوصول قبل: ${_stopAt(t.attributes['due_at'] as String)}'),
+            if (t.attributes['asset_ref'] != null) Text('الأصل: ${t.attributes['asset_ref']}'),
+            if ((t.attributes['affected'] as num? ?? 0) > 0) Text('المشتركون المتأثرون: ${t.attributes['affected']}'),
+            if (t.attributes['needs_permit'] == true)
+              Text(t.attributes['permit_no'] != null ? 'تصريح الحفر: ${t.attributes['permit_no']} حتى ${t.attributes['permit_expires']}' : '⚠ أعمال حفر: لا تصريح بعد',
+                  key: const Key('ut-permit'), style: t.attributes['permit_no'] == null ? text.titleSmall?.copyWith(color: Theme.of(context).colorScheme.error) : null),
+            if (t.attributes['customer_name'] != null) Text('${t.attributes['customer_name']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isOilgas) ...[
           Card(key: const Key('oilgas-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('${t.attributes['journey_ref'] ?? ''} · ${t.attributes['site_code'] ?? ''}', style: text.labelMedium),
@@ -453,6 +469,20 @@ class _ActionsState extends State<_Actions> {
         if (err != null) return toast(context, err, error: true);
         toast(context, s.offline ? 'سُجّل المشوار وسيُرسل عند عودة الاتصال' : 'انتهى المشوار');
         Navigator.of(context).pop();
+      case TaskAction.utArrived:
+      case TaskAction.utReinstated:
+        final err = await s.utilitiesStage(task.id, action == TaskAction.utArrived ? 'ut_arrived' : 'ut_reinstated');
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.utIsolate:
+        final checks = await _utilitiesChecksForm(context);
+        if (checks == null) return;
+        final err = await s.utilitiesStage(task.id, 'ut_isolated', checks: checks);
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.utRestored:
+        final r = await _utilitiesResultForm(context);
+        if (r == null) return;
+        final err = await s.utilitiesStage(task.id, 'ut_restored', result: r.result, note: r.note);
+        if (err != null && context.mounted) toast(context, err, error: true);
       case TaskAction.ogInspect:
         final checks = await _oilgasForm(context);
         if (checks == null) return;
@@ -665,6 +695,50 @@ class _ActionsState extends State<_Actions> {
           ]),
         );
       }),
+    );
+  }
+
+  /// Utilities safety checklist before work: every item must be ticked (the API refuses otherwise); the permit item only when digging.
+  Future<Map<String, bool>?> _utilitiesChecksForm(BuildContext context) {
+    final items = utilitiesChecks.keys.where((k) => k != 'permit_on_site' || task.attributes['needs_permit'] == true).toList();
+    final v = {for (final k in items) k: false};
+    return showModalBottomSheet<Map<String, bool>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('قائمة السلامة قبل العمل', style: Theme.of(ctx).textTheme.titleLarge),
+          for (final k in items)
+            CheckboxListTile(key: Key('ut-check-$k'), value: v[k], title: Text(utilitiesChecks[k]!), onChanged: (x) => set(() => v[k] = x ?? false)),
+          const SizedBox(height: 8),
+          FilledButton(key: const Key('ut-checks-save'), onPressed: v.values.every((x) => x) ? () => Navigator.pop(ctx, Map<String, bool>.from(v)) : null,
+              child: const Text('تأكيد العزل')),
+        ]),
+      )),
+    );
+  }
+
+  /// Utilities repair: the result and a note.
+  Future<({String result, String? note})?> _utilitiesResultForm(BuildContext context) {
+    String? result;
+    final n = TextEditingController();
+    return showModalBottomSheet<({String result, String? note})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('نتيجة الإصلاح', style: Theme.of(ctx).textTheme.titleLarge),
+          for (final e in utilitiesResults.entries)
+            ListTile(key: Key('ut-result-${e.key}'), title: Text(e.value), selected: result == e.key,
+                leading: Icon(result == e.key ? Icons.radio_button_checked : Icons.radio_button_unchecked), onTap: () => set(() => result = e.key)),
+          TextField(key: const Key('ut-note'), controller: n, maxLength: 500, decoration: const InputDecoration(labelText: 'ملاحظة (ما تم)')),
+          const SizedBox(height: 8),
+          FilledButton(key: const Key('ut-result-save'), onPressed: result == null ? null : () => Navigator.pop(ctx, (result: result!, note: n.text.trim().isEmpty ? null : n.text.trim())),
+              child: const Text('تأكيد')),
+        ]),
+      )),
     );
   }
 
