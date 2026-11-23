@@ -294,6 +294,23 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Tour bus: the group on board, with the head count and the odometer (checked online at once against the seats).
+  Future<String?> tourBoarded(String taskId, {required int headcount, required int odometer}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tr_boarded', 'headcount': headcount, 'odometer_km': odometer}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(stage: 'tr_boarded'));
+    return null;
+  }
+
+  /// Tour bus: back, with the head count, the odometer and why fewer came back; then ends the trip.
+  Future<String?> tourReturned(String taskId, {required int headcount, required int odometer, String? note}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tr_returned', 'headcount': headcount, 'odometer_km': odometer, 'note': ?note}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'tr_returned'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Tanker: the litres filled and where (checked online at once against the tanker's capacity).
   Future<String?> tankFilled(String taskId, {required int litres, String? source}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tank_filled', 'litres': litres, 'note': ?source}, wait: true);

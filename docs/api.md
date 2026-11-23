@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -471,6 +471,24 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | GET | `/taxi/report?from=&to=` | الإجماليات بطريقة الدفع، والسائقون (النقد المطلوب تسليمه)، وحسابات الشركات، والفئات |
 
 من التطبيق: معالم `tx_arrived` ثم `tx_picked` ثم `tx_dropped` مع `trip_km` و`payment` (أخطاء `payment_required`، `km_required` إلا بأجرة ثابتة، `no_account`). الأجرة = الثابتة أو فتحة العداد + الكيلومترات + الانتظار بعد 5 دقائق مجانية، بحد أدنى. «الراكب لم يحضر» (`passenger_no_show`) فقط بعد الوصول وانتظار 10 دقائق (`not_arrived`، `wait_more`).
+
+## قطاع الحافلات السياحية tour (القطاع 13)
+
+رحلات مجموعات لمكاتب السياحة والمدارس والشركات: رحلة `TR-n` لعميل، بعدد ركاب وبداية ونهاية (31 يومًا حدًا أقصى) وبرنامج وسعر وعربون. كل حافلة مهمة `TR-n-B<رقم>` تحجز الحافلة وسائقها حصريًا طوال الرحلة، وتتحرر الحافلة عند تسجيل العودة.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST | `/tours/trips` | الرحلات لفترة (`from`، `to`، افتراضيًا اليوم و30 يومًا)؛ الإنشاء: `customer_id`، `group_name`، `pax`، `start_at`، `end_at`، `pickup`، `destination`، واختياريًا `itinerary` ([{place, at, note}])، `cross_border`، `contact_name`، `contact_phone`، `price`، `deposit`، `notes` |
+| GET | `/tours/trips/:id` | الرحلة بحافلاتها، والمقاعد، وعدد من في الكشف، والحالة (planned، ready، under_way، back، canceled)، والكيلومترات |
+| GET | `/tours/trips/:id/candidates` | الحافلات والسائقون المتاحون طوال الرحلة، والمقاعد الناقصة |
+| POST | `/tours/trips/:id/buses` | `{asset_id, driver_worker_id, seats?}`؛ المقاعد من `capacity.seats` للحافلة؛ أخطاء `not_a_bus`، `vehicle_booked`، `driver_booked` |
+| POST | `/tours/trips/:id/buses/:taskId/release` | إلغاء حافلة قبل انطلاقها |
+| GET / POST | `/tours/trips/:id/manifest` | كشف الركاب؛ POST يستبدله بـ `passengers` ([{name, id_no, nationality, phone, bus_seq}])؛ أخطاء `over_pax`، `id_required` لرحلات الحدود |
+| POST | `/tours/trips/:id/cancel` | إلغاء رحلة لم تنطلق، وتُلغى حافلاتها |
+| GET | `/tours/exceptions` | مقاعد ناقصة أو كشف حدود ناقص لرحلة تبدأ خلال 3 أيام، حافلة لم تنطلق بعد 15 دقيقة، عادت بركاب أقل، لم تعد بعد نهاية الرحلة |
+| GET | `/tours/report?from=&to=` | الرحلات والركاب والحافلات وأيام الحافلات والكيلومترات والمبالغ والعربون، إجمالًا ولكل عميل |
+
+من التطبيق: معلم `tr_boarded` ثم `tr_returned`، كلاهما مع `headcount` و`odometer_km` (أخطاء `headcount_required`، `odometer_required`، `over_seats`، `odometer_too_low`، و`note_required` إذا عاد عدد أقل بلا ملاحظة `note`). لا تنتهي المهمة قبل `tr_returned`.
 
 ## قطاع تأجير المعدات الثقيلة equipment (القطاع 16)
 

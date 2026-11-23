@@ -132,6 +132,9 @@ class DriverTask {
   bool get isContainer => sectorPack == 'containers@1';
   String? get containerNo => attributes['container_no'] as String?;
   bool get needsGateRef => attributes['gate'] == true;
+  /// A tour bus (tour pack): the group boards (head count, odometer) → back (head count, odometer, a note when fewer) → done.
+  bool get isTour => sectorPack == 'tour@1';
+  List<Map<String, dynamic>> get itinerary => (attributes['itinerary'] as List? ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
   /// A taxi or limousine ride (taxi pack): arrive at the pickup → passenger on board → dropped (km, payment; ends the ride).
   bool get isTaxi => sectorPack == 'taxi@1';
   String? get passengerName => attributes['passenger_name'] as String?;
@@ -213,7 +216,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker || isTaxi || isTour ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -287,7 +290,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged, txArrived, txPicked, txDropped, trBoarded, trReturned }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -301,6 +304,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isContainer) return _containerActions(t);
   if (t.isTanker) return _tankerActions(t);
   if (t.isTaxi) return _taxiActions(t);
+  if (t.isTour) return _tourActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -481,6 +485,49 @@ List<TaskAction> _taxiActions(DriverTask t) {
   }
 }
 
+/// Tour bus: accept → set off → group on board (heads, odometer) → back (heads, odometer) → done.
+List<TaskAction> _tourActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return switch (t.stage) {
+        'tr_returned' => [TaskAction.complete],
+        'tr_boarded' => [TaskAction.trReturned, TaskAction.fail],
+        _ => [TaskAction.trBoarded, TaskAction.fail],
+      };
+    default:
+      return [];
+  }
+}
+
+const tourActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.start: 'انطلقت لنقطة التجمع',
+  TaskAction.trBoarded: 'صعد الركاب، انطلقنا',
+  TaskAction.trReturned: 'عدنا، تسجيل العودة',
+  TaskAction.complete: 'إنهاء الرحلة',
+  TaskAction.fail: 'تعذّرت الرحلة',
+};
+
+/// Same codes as the API (tour FAIL_REASONS).
+const tourFailReasons = {
+  'bus_breakdown': 'عطل في الحافلة',
+  'accident': 'حادث',
+  'border_refused': 'رُفض العبور في المنفذ',
+  'group_canceled': 'ألغت المجموعة الرحلة',
+  'other': 'سبب آخر',
+};
+
+/// A count or an odometer typed by the driver (Arabic digits accepted), 0..max; null when invalid.
+int? parseCount(String raw, int max) {
+  final s = raw.trim().replaceAllMapped(RegExp('[٠-٩]'), (m) => '${m[0]!.codeUnitAt(0) - 0x0660}').replaceAll(RegExp('[,٬]'), '');
+  final n = int.tryParse(s);
+  return n == null || n < 0 || n > max ? null : n;
+}
+
 /// Same as the API (taxi FREE_WAIT_MIN). [تخمين]
 const taxiFreeWaitMin = 5;
 
@@ -591,6 +638,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (tankerActionLabels[a] ?? actionLabels[a]!)
                             : t.isTaxi
                             ? (taxiActionLabels[a] ?? actionLabels[a]!)
+                            : t.isTour
+                            ? (tourActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
@@ -939,7 +988,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isTaxi ? taxiFailReasons : t.isTour ? tourFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -1022,6 +1071,9 @@ const rejectReasons = {
   'no_account': 'هذا الحجز ليس على حساب شركة',
   'not_arrived': 'سجّل وصولك لمكان الراكب أولًا',
   'wait_more': 'انتظر 10 دقائق من الوصول قبل تسجيل عدم حضور الراكب',
+  'headcount_required': 'أدخل عدد الركاب',
+  'over_seats': 'العدد أكثر من مقاعد الحافلة',
+  'note_required': 'العائدون أقل من الصاعدين، اكتب السبب',
   'unknown_student': 'الطالب ليس على هذا الخط، حدّث القائمة',
   'students_on_board': 'ما زال طالب في الحافلة، سجّل نزوله قبل إنهاء الرحلة',
   'students_unmarked': 'سجّل صعود كل طالب أو غيابه قبل إنهاء الرحلة',

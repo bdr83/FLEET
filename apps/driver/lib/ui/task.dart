@@ -156,6 +156,25 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isTour) ...[
+          Card(key: const Key('tour-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${t.attributes['trip_ref'] ?? ''} · حافلة ${t.attributes['bus_seq'] ?? ''}${t.attributes['cross_border'] == true ? ' · عبر الحدود' : ''}', style: text.labelMedium),
+            Text('${t.attributes['group_name'] ?? ''}', style: text.titleLarge),
+            if (t.attributes['customer_name'] != null) Text('${t.attributes['customer_name']}'),
+            Text('الركاب: ${t.attributes['pax'] ?? '—'}${t.attributes['seats'] != null ? ' · مقاعد الحافلة: ${t.attributes['seats']}' : ''}'),
+            Text('التجمع: ${t.attributes['pickup'] ?? '—'}'),
+            Text('الوجهة: ${t.attributes['destination'] ?? '—'}'),
+            if (t.attributes['contact_name'] != null || t.attributes['contact_phone'] != null)
+              Row(children: [Text('المسؤول: ${t.attributes['contact_name'] ?? ''} '), if (t.attributes['contact_phone'] != null) Ltr('${t.attributes['contact_phone']}')]),
+            if (t.itinerary.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text('البرنامج', style: text.titleSmall),
+              for (final st in t.itinerary) Text('• ${st['place']}${st['at'] != null ? ' (${_stopAt(st['at'] as String)})' : ''}${st['note'] != null ? ' · ${st['note']}' : ''}'),
+            ],
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isTanker) ...[
           Card(key: const Key('tanker-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('صهريج · ${t.attributes['order_ref'] ?? ''}', style: text.labelMedium),
@@ -409,6 +428,18 @@ class _ActionsState extends State<_Actions> {
         if (err != null) return toast(context, err, error: true);
         toast(context, s.offline ? 'سُجّل المشوار وسيُرسل عند عودة الاتصال' : 'انتهى المشوار');
         Navigator.of(context).pop();
+      case TaskAction.trBoarded:
+      case TaskAction.trReturned:
+        final out = action == TaskAction.trBoarded;
+        final r = await _tourForm(context, out: out);
+        if (r == null) return;
+        final err = out ? await s.tourBoarded(task.id, headcount: r.heads, odometer: r.odo) : await s.tourReturned(task.id, headcount: r.heads, odometer: r.odo, note: r.note);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        if (!out) {
+          toast(context, s.offline ? 'سُجّلت العودة وسترسل عند عودة الاتصال' : 'سُجّلت العودة وانتهت الرحلة');
+          Navigator.of(context).pop();
+        }
       case TaskAction.tankFilled:
       case TaskAction.tankDischarged:
         final fill = action == TaskAction.tankFilled;
@@ -595,6 +626,36 @@ class _ActionsState extends State<_Actions> {
           ]),
         );
       }),
+    );
+  }
+
+  /// Tour bus: the head count and the odometer on boarding, and on return with a note (needed when fewer came back).
+  Future<({int heads, int odo, String? note})?> _tourForm(BuildContext context, {required bool out}) {
+    final h = TextEditingController(), o = TextEditingController(), n = TextEditingController();
+    final seats = (task.attributes['seats'] as num?)?.toInt() ?? 200;
+    bool ok() => parseCount(h.text, seats) != null && parseCount(o.text, 10000000) != null;
+    return showModalBottomSheet<({int heads, int odo, String? note})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(out ? 'صعود الركاب' : 'العودة', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          TextField(key: const Key('headcount'), controller: h, autofocus: true, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+              decoration: InputDecoration(labelText: 'عدد الركاب في الحافلة', helperText: 'المقاعد: $seats',
+                  errorText: h.text.trim().isNotEmpty && parseCount(h.text, seats) == null ? 'العدد أكثر من المقاعد أو غير صحيح' : null), onChanged: (_) => set(() {})),
+          TextField(key: const Key('tour-odometer'), controller: o, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(labelText: 'قراءة العدّاد (كم)'), onChanged: (_) => set(() {})),
+          if (!out) TextField(key: const Key('tour-note'), controller: n, maxLength: 500, decoration: const InputDecoration(labelText: 'ملاحظة (إلزامية إن عاد عدد أقل)')),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('tour-save'),
+            onPressed: ok() ? () => Navigator.pop(ctx, (heads: parseCount(h.text, seats)!, odo: parseCount(o.text, 10000000)!, note: n.text.trim().isEmpty ? null : n.text.trim())) : null,
+            child: Text(out ? 'تأكيد الصعود والانطلاق' : 'تأكيد العودة'),
+          ),
+        ]),
+      )),
     );
   }
 
@@ -941,4 +1002,10 @@ class _ShuttleCard extends StatelessWidget {
       ],
     ])));
   }
+}
+
+/// A stop time of the tour itinerary: day/month and the hour, in the phone's time.
+String _stopAt(String iso) {
+  final d = DateTime.parse(iso).toLocal();
+  return '${d.day}/${d.month} ${two(d.hour)}:${two(d.minute)}';
 }
