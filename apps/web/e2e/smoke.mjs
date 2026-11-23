@@ -149,7 +149,7 @@ try {
   await shot(page, '02c-contract');
 
   // Maintenance: a 7-day plan is due soon → open a work order from it, add a cost line, complete → expense posted
-  await page.click('nav a:has-text("الصيانة")');
+  await page.click('nav a[href="/maintenance"]');
   await page.click('button[role=tab]:has-text("خطط الصيانة")');
   await page.selectOption('select[name=asset_id]', { label: '12-34567' });
   await page.fill('input[name=name]', 'فحص أسبوعي');

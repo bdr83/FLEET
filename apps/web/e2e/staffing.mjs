@@ -22,6 +22,8 @@ async function apiCall(method, path, body, token) {
   return data;
 }
 const kwDay = (plus = 0) => new Date(Date.now() + 3 * 3_600_000 + plus * 86_400_000).toISOString().slice(0, 10);
+// The driver works 8 h 10 min today (Kuwait time), so the run needs the Kuwait clock past 08:20.
+{ const d = new Date(Date.now() + 3 * 3_600_000); if (d.getUTCHours() * 60 + d.getUTCMinutes() < 500) { console.log('SKIP: run after 08:20 Kuwait time (the shift needs 8 h 10 min of today)'); process.exit(0); } }
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ locale: 'ar-KW', viewport: { width: 1440, height: 900 } });
@@ -128,7 +130,7 @@ try {
   await sync(d1, { type: 'milestone', task_id: today.task_id, code: 'check_in', lat: 29.31, lng: 47.93 }, ago(490));
   await sync(d1, { type: 'task_status', task_id: today.task_id, to_status: 'in_progress' }, ago(490));
   await sync(d1, { type: 'milestone', task_id: today.task_id, code: 'check_out' });
-  if ((await sync(d1, { type: 'task_status', task_id: today.task_id, to_status: 'completed' })).result !== 'applied') throw new Error('completion rejected');
+  { const r = await sync(d1, { type: 'task_status', task_id: today.task_id, to_status: 'completed' }); if (r.result !== 'applied') throw new Error(`completion rejected: ${JSON.stringify(r)}`); }
   await page.reload();
   await row.locator('td.cov.in').first().waitFor();
   await shot(page, 's-board');

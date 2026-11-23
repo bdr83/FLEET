@@ -41,6 +41,17 @@ DATABASE_URL=postgresql://app_rw:devpass@localhost:5432/fleet npm test
 - التطبيق يتصل بدور `app_rw` الذي لا يملك الجداول ولا يتجاوز RLS.
 - لا تُدمج ميزة إلى `main` دون نجاح CI ومراجعة.
 
+فحوص المتصفح (`apps/web/e2e`) والتطبيق (`apps/driver/e2e`) تدخل برمز الجوال مرات متتالية، فشغّل الخادم لها بـ `OTP_DEV_ECHO=1 OTP_RESEND_COOLDOWN_MS=0 OTP_MAX_PER_HOUR=1000`. وفحوص التوريد (`staffing`) تحتاج ساعة الكويت بعد 8:20 صباحًا لأن مناوبة اليوم تُعمل 8 ساعات و10 دقائق، فتتخطاها قبل ذلك.
+
+## بيانات العرض
+
+`scripts/demo-seed.mjs` ينشئ شركة عرض لكل قطاع (أو للقطاعات المختارة) بمركباتها وعمالها وعملائها وأعمال اليوم، تحت حساب المالك. أول عامل في كل شركة يدخل التطبيق بـ `driver-<القطاع>@demo.q8hub.com` وكلمة `DEMO_PASSWORD`. لا يحذف شيئًا، وتشغيله مرة ثانية يضيف مجموعة شركات أخرى.
+
+```bash
+API_URL=https://api.q8hub.com OWNER_EMAIL=... OWNER_PASSWORD=... DEMO_PASSWORD=... node scripts/demo-seed.mjs all
+node scripts/demo-seed.mjs taxi,school   # قطاعات محددة
+```
+
 ## واجهات P1
 
 انظر [docs/api.md](docs/api.md).
