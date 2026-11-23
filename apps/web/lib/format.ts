@@ -53,6 +53,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'freight', sector: 2, label: 'الشحن والنقل البري', hint: 'أوامر نقل، شاحنات ومقطورات، ناقلون من الباطن، ربح الرحلة' },
   { code: 'coldchain', sector: 3, label: 'التوزيع الغذائي والتبريد', hint: 'مسارات مبردة ومجمدة، نوافذ تسليم، قراءات حرارة، تالف وصلاحية' },
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع', hint: 'بوليصات ومحطات، مسح الباركود، محاولات التسليم، الإرجاع للمرسل' },
+  { code: 'moving', sector: 5, label: 'نقل الأثاث', hint: 'طلبات نقل بمعاينة وقائمة أغراض، عرض سعر وعربون، شاحنة وطاقم ليوم النقل، مطالبات الأضرار والتقييم' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين', hint: 'مواقع تخزين، استلام وصرف، أقدم صلاحية أولًا، جرد، تخزين للعملاء' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
@@ -301,3 +302,13 @@ export const SVC_STATE: Record<string, { label: string; tone: string }> = {
   follow_up: { label: 'يحتاج زيارة أخرى', tone: 'warning' }, to_close: { label: 'جاهز للإغلاق', tone: 'info' }, closed: { label: 'مغلق', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
 };
 export const SVC_RESULT: Record<string, { label: string; tone: string }> = { fixed: { label: 'تم الإصلاح', tone: 'success' }, follow_up: { label: 'زيارة أخرى', tone: 'warning' }, not_fixed: { label: 'لم يُصلح', tone: 'danger' } };
+
+/** Furniture moving (moving pack) labels. */
+export const MV_SIZE: Record<string, string> = { room: 'غرفة', studio: 'استوديو', apt_1: 'شقة غرفة', apt_2: 'شقة غرفتين', apt_3: 'شقة 3 غرف', apt_4: 'شقة 4 غرف+', villa: 'فيلا / بيت', office: 'مكتب' };
+export const MV_SERVICE: Record<string, string> = { packing: 'تغليف', assembly: 'فك وتركيب', crating: 'صناديق خشبية', storage: 'تخزين', cleaning: 'تنظيف' };
+export const MV_STATE: Record<string, { label: string; tone: string }> = {
+  new: { label: 'بانتظار المعاينة والسعر', tone: 'warning' }, quoted: { label: 'بانتظار رد العميل', tone: 'info' }, accepted: { label: 'بانتظار حجز الطاقم', tone: 'warning' },
+  booked: { label: 'الطاقم محجوز', tone: 'info' }, moving: { label: 'جاري النقل', tone: 'success' }, delivered: { label: 'وصل، جاهز للإغلاق', tone: 'info' },
+  closed: { label: 'مغلق', tone: 'muted' }, canceled: { label: 'ملغى', tone: 'muted' },
+};
+export const MV_CLAIM: Record<string, { label: string; tone: string }> = { open: { label: 'مفتوحة', tone: 'warning' }, settled: { label: 'سُوّيت', tone: 'success' }, rejected: { label: 'مرفوضة', tone: 'muted' } };

@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -492,3 +492,26 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | البلاغات، الوصول في الموعد، الإصلاح من أول زيارة، متوسط الاستجابة، العمالة والقطع، حسب الفني والتخصص |
 
 الفني: تحمل مهمة `service@1` في `attributes` الحقول `job_ref`، `seq`، `category`، `priority`، `problem`، `unit`، `address`، `contact_phone`، `previous` (ملخص آخر الزيارات). في `POST /v1/driver/sync`: محطة `arrived`، ثم `work_done` مع `result` و`note` (ما تم من عمل) و`received_by` (اسم العميل) و`parts`. إنهاء المهمة يحتاج `work_done`. رموز الرفض: `result_required`، `work_required`، `signer_required`، `parts_invalid`.
+
+## قطاع نقل الأثاث moving (القطاع 5)
+
+طلب النقل (`MV-n`) ينقل بيتًا أو مكتبًا من عنوان إلى عنوان. المراحل: `new` بانتظار المعاينة والسعر ← `quoted` بانتظار رد العميل ← `accepted` بانتظار حجز الطاقم ← `booked` ← `moving` (السائق بدأ) ← `delivered` (فُرّغ) ← `closed`، أو `canceled`. ساعات الحجز وعدد العمال تُقترح من الحجم (غرفة ساعتان وعامل، شقة غرفتين 5 ساعات و3 عمال، فيلا 10 ساعات و6 عمال) [تخمين]. العربون يُسجَّل فقط: المنصة لا تحتفظ بأموال العملاء. يوم النقل: الشاحنة والسائق على المهمة الرئيسية `MV-n-1`، وكل عامل على مهمة طاقم `MV-n-1-H1`… تحجزه حصريًا لنفس النافذة. الأسعار من المكتب.
+
+| المسار | الوصف |
+|---|---|
+| `GET/POST /v1/moving/jobs` | `{legal_entity_id, customer_id, from_site{area, block?, street?, house?, floor?, apartment?, lift?, phone?}, to_site{...}, home_size: room\|studio\|apt_1..apt_4\|villa\|office, services?[packing, assembly, crating, storage, cleaning], move_at, hours?, crew_size?, notes?, survey_at?}`؛ التصفية `?state=` و`?customer_id=` |
+| `GET /v1/moving/jobs/:id` | الطلب مع `items` و`crew` (المهام والأسماء والشاحنة) و`claims` |
+| `POST /jobs/:id/survey` | `{volume_m3? (منزلة عشرية واحدة), items?[{room?, name, qty?, fragile?}] (تستبدل القائمة، حتى 300), surveyed_at?}` حتى بدء النقل |
+| `POST /jobs/:id/quote` | `{quote_amount, deposit_amount?}`؛ يُستبدل حتى موافقة العميل. العربون لا يتجاوز السعر |
+| `POST /jobs/:id/accept` | `{deposit_paid?}`؛ يُستدعى مرة أخرى بـ `deposit_paid: true` عند استلام العربون |
+| `POST /jobs/:id/book` | `{driver_worker_id, asset_id, helper_worker_ids?[], starts_at?, hours?}`؛ 409 `vehicle_booked` أو `worker_booked`. بعد تعذّر مهمة السائق يُعاد الحجز ويُحرَّر العمال السابقون |
+| `POST /jobs/:id/close` | `{extra_amount?, rating? 1-5, rating_note?}` بعد التفريغ؛ تُنهى مهام الطاقم المفتوحة |
+| `POST /jobs/:id/cancel` | `{reason}` قبل بدء النقل |
+| `POST /jobs/:id/claims` | `{item, description, claimed_amount?}` خلال 7 أيام من التسليم [تخمين]؛ بعدها 409 `claim_period_over` |
+| `POST /claims/:id/decide` | `{status: settled\|rejected, settled_amount (للتسوية), note (مطلوبة للرفض)}` |
+| `GET /board?date=` | عمليات اليوم مع الشاحنة والطاقم |
+| `GET /exceptions` | `to_quote` (بلا سعر بعد 48 ساعة [تخمين])، `awaiting_answer`، `to_book` (موافق عليها وموعدها خلال يومين بلا طاقم [تخمين])، `deposit_unpaid`، `to_close`، `claims` المفتوحة |
+| `GET /report?from&to` | حسب تاريخ النقل: الطلبات والعروض والقبول ونسبته والإيراد (السعر + الإضافي للمغلقة) ومتوسط التقييم والمطالبات والتعويضات، وحسب الحجم |
+
+السائق: تحمل مهمة `moving@1` الرئيسية `kind: move` و`move_ref`، `home_size`، `services`، `volume_m3`، `items_count`، `fragile`، `pickup_address`، `address`، `customer_name`، `contact_phone`، `crew`. في `POST /v1/driver/sync`: محطة `loaded`، ثم `unloaded` مع `received_by` (اسم المستلم) و`note` (ضرر أو نقص). إنهاء المهمة يحتاج `unloaded`. رمز الرفض: `receiver_required`. مهام الطاقم `kind: crew` بالتدفق العادي (قبول، بدء، إنهاء) دون محطات.
+
