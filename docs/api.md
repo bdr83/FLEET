@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، oilgas، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، tour، equipment، rental، oilgas، cranes، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -508,6 +508,24 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | GET | `/oilgas/report?from=&to=` | الرحلات والمنتهية وفي الوقت والمتأخرة والملغاة والركاب والحمولات الخطرة والبلاغات، إجمالًا ولكل موقع |
 
 من التطبيق: `og_inspected` مع `checks` (tyres، brakes، lights، seat_belts، fire_extinguisher، first_aid، spill_kit، و`h2s_monitor` في منطقة H2S). الفحص الراسب يُحفظ ويُرفض بـ `inspection_failed`. بعده `og_departed` (يُرفض بـ `not_approved` قبل الاعتماد)، ثم `og_checkin` (يتكرر)، ثم `og_arrived`. لا تنتهي المهمة قبل `og_arrived`.
+
+## قطاع الرافعات ورفعات المعدات cranes (القطاع 19)
+
+يبني على تأجير المعدات: عقد تأجير الرافعة وأيام عملها وعدّاد الساعات من مسارات `/equipment` (متاحة لشركة فعّلت `equipment` أو `cranes`). لكل رافعة (`asset_type = crane`) جدول حمولة من المصنّع، ولكل رفعة خطة `LP-n` في يوم عمل من العقد.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET | `/cranes/fleet` | الرافعات بمواصفاتها وجدولها وتاريخ انتهاء شهادة الفحص |
+| PUT | `/cranes/fleet/:assetId` | `max_capacity_t`، `boom_m`، `wind_limit_ms` (افتراضي 9.8)، `chart` = `[{radius_m, capacity_t}]` بنصف قطر تصاعدي وحمولة لا تزيد؛ صلاحية `fleet:write` |
+| GET / POST | `/cranes/lifts?date=` ، `/cranes/lifts` | الإنشاء: `hire_id`، `lift_date`، `lift_time`، `description`، `load_t` (مع أدوات الرفع)، `radius_m`، `rigger_worker_id`، `tandem`، `over_people`. الحمولة المقنّنة من الجدول عند نصف القطر أو الأكبر منه. أخطاء `no_chart`، `no_work_day`، `out_of_chart`، `over_capacity` (أكثر من 100%)، `crane_cert`، `operator_cert`، `rigger_cert` (وثائق `tpi_certificate`، `crane_operator`، `rigger_cert` سارية يوم الرفعة) |
+| GET | `/cranes/lifts/:id` | الخطة بالاستخدام والحالة (planned، done، aborted، canceled) |
+| POST | `/cranes/lifts/:id/approve` | اعتماد رفعة حرجة (75% فأكثر، أو مزدوجة، أو فوق أشخاص) |
+| POST | `/cranes/lifts/:id/record` | المكتب يسجل `{event: done, wind_ms}` أو `{event: aborted, note}` |
+| POST | `/cranes/lifts/:id/cancel` | `{reason}` لخطة لم تُنفذ |
+| GET | `/cranes/exceptions` | حرجة اليوم أو غدًا بلا اعتماد، رفعات أيام سابقة مفتوحة، موقوفة، رافعات بلا جدول، شهادات منتهية أو تنتهي خلال 30 يومًا |
+| GET | `/cranes/report?from=&to=` | الرفعات والمنفذة والموقوفة (وللرياح) والحرجة وأعلى استخدام وأثقل حمولة، إجمالًا ولكل عميل |
+
+من التطبيق: مهام اليوم تحمل `lifts`. عملية مزامنة جديدة `{type: 'lift', lift_id, event: done|aborted, wind_ms, note}` أثناء العمل. الرفض: `lift_not_approved`، `wind_required`، `wind_too_high` (فوق حد الرافعة)، `abort_reason_required`، `lift_closed`، `unknown_lift`. لا يُسجَّل `work_end` ولا تكتمل المهمة وفيها رفعة مخططة (`lifts_open`).
 
 ## قطاع تأجير المعدات الثقيلة equipment (القطاع 16)
 

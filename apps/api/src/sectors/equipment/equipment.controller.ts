@@ -69,7 +69,7 @@ export async function equipStage(c: PoolClient, taskId: string, code: Stage, x: 
 
 @Controller('v1/equipment')
 @UseGuards(AuthGuard)
-@Pack('equipment')
+@Pack('equipment', 'cranes')
 export class EquipmentController {
   constructor(private readonly db: DbService) {}
 

@@ -17,6 +17,7 @@ export const PACKS = [
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة' },
   { code: 'rental', sector: 17, label: 'تأجير السيارات' },
   { code: 'oilgas', sector: 18, label: 'خدمات النفط والغاز' },
+  { code: 'cranes', sector: 19, label: 'الرافعات ورفعات المعدات' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي' },
   { code: 'service', sector: 22, label: 'الصيانة الفنية' },

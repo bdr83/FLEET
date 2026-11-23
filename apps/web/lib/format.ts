@@ -66,6 +66,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
   { code: 'rental', sector: 17, label: 'تأجير السيارات', hint: 'حجوزات وعقود إيجار، استلام وإرجاع بالعدّاد والوقود، رسوم الكيلومترات والوقود والأضرار، توصيل للعميل، المخالفات' },
   { code: 'oilgas', sector: 18, label: 'خدمات النفط والغاز', hint: 'خطط رحلات لمواقع الحقول باعتماد مدير الرحلات، وثائق السائق والمركبة الإلزامية لكل موقع (H2S والتصاريح)، فحص المركبة قبل الانطلاق، بلاغات دورية وإنذار التأخير' },
+  { code: 'cranes', sector: 19, label: 'الرافعات ورفعات المعدات', hint: 'جدول الحمولة لكل رافعة، خطة رفع بنسبة الاستخدام، اعتماد الرفعات الحرجة، شهادات الفحص والمشغّل والموجّه، حد الرياح عند التنفيذ' },
   { code: 'concrete', sector: 20, label: 'الخرسانة الجاهزة', hint: 'طلبات صب، خلاطات، تذاكر، انتظار' },
   { code: 'internal', sector: 21, label: 'أسطول الشركة الداخلي', hint: 'طلبات مركبات للموظفين، اعتماد، تكلفة الكيلومتر' },
   { code: 'service', sector: 22, label: 'الصيانة الفنية', hint: 'بلاغات صيانة بأولوية وموعد استجابة، زيارات الفنيين، القطع المستخدمة، الصيانة الدورية' },
@@ -110,7 +111,8 @@ export const WORKER_STATUS: Record<string, { label: string; tone: string }> = {
 export const DOC_TYPE: Record<string, string> = {
   driving_license: 'رخصة قيادة', vehicle_registration: 'دفتر المركبة', insurance: 'تأمين', civil_id: 'البطاقة المدنية',
   residency: 'إقامة', work_permit: 'إذن عمل', inspection: 'فحص فني',
-  h2s: 'دورة H2S', defensive_driving: 'القيادة الوقائية', site_pass: 'تصريح دخول الموقع', hazmat: 'نقل المواد الخطرة', medical: 'لياقة طبية', site_sticker: 'ملصق دخول المركبة', other: 'أخرى',
+  h2s: 'دورة H2S', defensive_driving: 'القيادة الوقائية', site_pass: 'تصريح دخول الموقع', hazmat: 'نقل المواد الخطرة', medical: 'لياقة طبية', site_sticker: 'ملصق دخول المركبة',
+  tpi_certificate: 'شهادة فحص الرافعة (TPI)', crane_operator: 'رخصة مشغّل رافعة', rigger_cert: 'شهادة موجّه الرفع', other: 'أخرى',
 };
 
 export const CUSTOMER_STATUS: Record<string, { label: string; tone: string }> = {
@@ -326,6 +328,10 @@ export const OG_PURPOSE: Record<string, string> = { crew: 'نقل طاقم', equ
 export const OG_FAIL: Record<string, string> = { vehicle_breakdown: 'عطل', inspection_failed: 'لم تجتز الفحص', site_closed: 'الموقع مغلق', gate_refused: 'رُفض الدخول', weather: 'الطقس', accident: 'حادث', other: 'سبب آخر' };
 export const OG_CHECK: Record<string, string> = { tyres: 'الإطارات', brakes: 'الفرامل', lights: 'الأضواء', seat_belts: 'أحزمة الأمان', fire_extinguisher: 'طفاية الحريق', first_aid: 'الإسعاف', spill_kit: 'عدة الانسكاب', h2s_monitor: 'كاشف H2S' };
 
+/** Cranes and lifting (cranes pack) labels. */
+export const CR_STATUS: Record<string, { label: string; tone: string }> = {
+  planned: tone('مخططة', 'info'), done: tone('نُفذت', 'success'), aborted: tone('أُوقفت', 'danger'), canceled: tone('ملغاة'),
+};
 /** Heavy equipment hire (equipment pack) labels. */
 export const RATE_UNIT: Record<string, string> = { hour: 'بالساعة', day: 'باليوم', month: 'بالشهر' };
 export const HIRE_STATE: Record<string, { label: string; tone: string }> = {

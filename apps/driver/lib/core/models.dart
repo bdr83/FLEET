@@ -48,6 +48,7 @@ class DriverTask {
     this.freight,
     this.shuttle,
     this.school,
+    this.lifts,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -64,6 +65,8 @@ class DriverTask {
   final Map<String, dynamic>? shuttle;
   /// School trips: {trip_id, students: [{id, name, grade, stop_seq, guardian_name, guardian_phone, handover, note, event, received_by, excused}]}.
   final Map<String, dynamic>? school;
+  /// Crane working days (cranes pack): the lift plans [{id, ref, time, description, load_t, radius_m, rated_t, utilization, critical, approved, status, wind_limit_ms}].
+  final List<dynamic>? lifts;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -80,10 +83,11 @@ class DriverTask {
         freight: _map(j['freight']),
         shuttle: _map(j['shuttle']),
         school: _map(j['school']),
+        lifts: j['lifts'] is List ? j['lifts'] as List : null,
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school, List<dynamic>? lifts}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -98,6 +102,7 @@ class DriverTask {
         freight: freight,
         shuttle: shuttle ?? this.shuttle,
         school: school ?? this.school,
+        lifts: lifts ?? this.lifts,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
@@ -134,6 +139,9 @@ class DriverTask {
   bool get needsGateRef => attributes['gate'] == true;
   /// An oilfield journey (oilgas pack): inspect the vehicle → leave (once approved) → call in at the interval → arrive.
   bool get isOilgas => sectorPack == 'oilgas@1';
+  /// The lift plans of a crane working day (cranes pack); the day cannot end while one is planned.
+  List<Lift> get liftList => [for (final x in lifts ?? const []) if (x is Map) Lift.fromJson(Map<String, dynamic>.from(x))];
+  bool get liftsOpen => liftList.any((l) => l.status == 'planned');
   /// A tour bus (tour pack): the group boards (head count, odometer) → back (head count, odometer, a note when fewer) → done.
   bool get isTour => sectorPack == 'tour@1';
   List<Map<String, dynamic>> get itinerary => (attributes['itinerary'] as List? ?? const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
@@ -1141,6 +1149,13 @@ const rejectReasons = {
   'not_on_board': 'الطالب لم يُسجَّل صعوده',
   'already_on_board': 'الطالب في الحافلة، سجّل نزوله أولًا',
   'meter_required': 'أدخل قراءة عدّاد الساعات',
+  'lifts_open': 'سجّل كل رفعة منفذة أو موقوفة قبل إنهاء يوم العمل',
+  'lift_not_approved': 'رفعة حرجة لم تُعتمد بعد، لا تنفذها وتواصل مع المكتب',
+  'wind_required': 'أدخل سرعة الرياح',
+  'wind_too_high': 'الرياح فوق حد الرافعة، أوقف الرفعة',
+  'abort_reason_required': 'اكتب سبب الإيقاف',
+  'lift_closed': 'الرفعة مسجّلة مسبقًا',
+  'unknown_lift': 'الرفعة ليست على هذا اليوم، حدّث القائمة',
   'meter_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمعدة',
   'meter_invalid': 'قراءة الانتهاء يجب أن تكون بعد قراءة البدء وخلال 24 ساعة',
   'signer_required': 'اكتب اسم مشرف الموقع',
@@ -1162,4 +1177,19 @@ double? parseCelsius(String s) {
   if (!RegExp(r'^-?\d{1,2}(\.\d)?$').hasMatch(t)) return null;
   final n = double.parse(t);
   return n < -50 || n > 60 ? null : n;
+}
+
+/// A crane lift plan on a working day: what is lifted, the load against the rated capacity, and where it stands.
+class Lift {
+  Lift({required this.id, required this.ref, this.time, required this.description, required this.loadT, required this.radiusM, required this.ratedT, required this.utilization,
+      this.critical = false, this.approved = false, required this.status, this.windLimit = 9.8});
+  factory Lift.fromJson(Map<String, dynamic> j) => Lift(id: j['id'] as String, ref: j['ref'] as String? ?? '', time: (j['time'] as String?)?.substring(0, 5), description: j['description'] as String? ?? '',
+      loadT: (j['load_t'] as num?)?.toDouble() ?? 0, radiusM: (j['radius_m'] as num?)?.toDouble() ?? 0, ratedT: (j['rated_t'] as num?)?.toDouble() ?? 0,
+      utilization: (j['utilization'] as num?)?.toDouble() ?? 0, critical: j['critical'] == true, approved: j['approved'] == true, status: j['status'] as String? ?? 'planned',
+      windLimit: (j['wind_limit_ms'] as num?)?.toDouble() ?? 9.8);
+  final String id, ref, description, status;
+  final String? time;
+  final double loadT, radiusM, ratedT, utilization, windLimit;
+  final bool critical, approved;
+  bool get blocked => critical && !approved;
 }

@@ -256,6 +256,10 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isEquipment && t.liftList.isNotEmpty) ...[
+          _LiftsCard(t: t),
+          const SizedBox(height: 12),
+        ],
         if (t.isSchool) ...[
           _SchoolCard(t: t),
           const SizedBox(height: 12),
@@ -551,6 +555,7 @@ class _ActionsState extends State<_Actions> {
       case TaskAction.workStart:
       case TaskAction.workEnd:
         final end = action == TaskAction.workEnd;
+        if (end && task.liftsOpen) return toast(context, rejectReasons['lifts_open']!, error: true);
         final r = await _meterForm(context, end: end);
         if (r == null) return;
         final err = end ? await s.workEnd(task.id, r.meter, downtime: r.downtime, signedBy: r.signer!) : await s.workStart(task.id, r.meter);
@@ -1059,4 +1064,69 @@ class _ShuttleCard extends StatelessWidget {
 String _stopAt(String iso) {
   final d = DateTime.parse(iso).toLocal();
   return '${d.day}/${d.month} ${two(d.hour)}:${two(d.minute)}';
+}
+
+/// Crane working day: the lift plans in order, each with its load against the rated capacity. The operator records a lift
+/// done with the wind speed read on site, or stops it with the reason. A critical lift not yet approved cannot be done.
+class _LiftsCard extends StatelessWidget {
+  const _LiftsCard({required this.t});
+  final DriverTask t;
+
+  Future<void> _record(BuildContext context, Lift l, bool done) async {
+    final s = AppScope.of(context);
+    final wind = TextEditingController(), note = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: Text(done ? 'تنفيذ ${l.ref}' : 'إيقاف ${l.ref}'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(key: const Key('lift-wind'), controller: wind, autofocus: true, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: done ? 'سرعة الرياح الآن (م/ث)' : 'سرعة الرياح (اختياري)', helperText: 'حد الرافعة ${qtyText(l.windLimit)} م/ث')),
+        if (!done) TextField(key: const Key('lift-note'), controller: note, decoration: const InputDecoration(labelText: 'سبب الإيقاف')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
+        FilledButton(key: const Key('lift-ok'), onPressed: () => Navigator.pop(ctx, true), child: Text(done ? 'نُفذت' : 'أوقفت')),
+      ],
+    ));
+    if (ok != true || !context.mounted) return;
+    final w = double.tryParse(wind.text.trim().replaceAll(',', '.'));
+    if (done && w == null) return toast(context, rejectReasons['wind_required']!, error: true);
+    if (done && w! > l.windLimit) return toast(context, rejectReasons['wind_too_high']!, error: true);
+    if (!done && note.text.trim().isEmpty) return toast(context, rejectReasons['abort_reason_required']!, error: true);
+    final err = await s.markLift(t.id, l.id, done ? 'done' : 'aborted', wind: w, note: done ? null : note.text.trim());
+    if (!context.mounted) return;
+    if (err != null) return toast(context, err, error: true);
+    toast(context, done ? 'سُجّلت الرفعة منفذة' : 'سُجّل إيقاف الرفعة');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final lifts = t.liftList;
+    final open = t.status == 'in_progress';
+    return Card(key: const Key('lifts-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text('خطط الرفع اليوم', style: text.titleMedium),
+      Text('مخططة ${lifts.where((l) => l.status == 'planned').length} من ${lifts.length}', key: const Key('lifts-count')),
+      if (!open && t.status != 'completed') const Padding(padding: EdgeInsets.only(top: 4), child: Text('ابدأ العمل لتسجيل الرفعات')),
+      for (final l in lifts) ...[
+        const Divider(),
+        Row(children: [
+          if (l.time != null) ...[Ltr(l.time!, style: const TextStyle(fontWeight: FontWeight.bold)), const SizedBox(width: 8)],
+          Ltr(l.ref, style: text.labelMedium),
+          const SizedBox(width: 8),
+          Expanded(child: Text(l.description, style: text.titleSmall)),
+          Icon(switch (l.status) { 'done' => Icons.check_circle, 'aborted' => Icons.cancel_outlined, _ => Icons.radio_button_unchecked },
+              size: 20, color: switch (l.status) { 'done' => Colors.green, 'aborted' => scheme.error, _ => null }),
+        ]),
+        Row(children: [const Text('الحمولة '), Ltr('${qtyText(l.loadT)} t @ ${qtyText(l.radiusM)} m'), const Text(' · '), Ltr('${qtyText(l.utilization)}%',
+            style: TextStyle(fontWeight: FontWeight.bold, color: l.utilization >= 75 ? scheme.error : null)), Text(' من ${qtyText(l.ratedT)} طن')]),
+        if (l.critical) Text(l.approved ? 'رفعة حرجة معتمدة' : '⚠ رفعة حرجة لم تُعتمد: لا تنفذها', style: TextStyle(color: l.approved ? null : scheme.error, fontWeight: FontWeight.bold)),
+        if (open && l.status == 'planned') Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          Semantics(button: true, label: 'نُفذت ${l.ref}', excludeSemantics: true, child: TextButton(onPressed: l.blocked ? null : () => _record(context, l, true), child: const Text('نُفذت'))),
+          Semantics(button: true, label: 'أوقفت ${l.ref}', excludeSemantics: true, child: TextButton(onPressed: () => _record(context, l, false), child: const Text('أوقفت'))),
+        ]),
+        if (l.status != 'planned') Text(l.status == 'done' ? 'نُفذت' : l.status == 'aborted' ? 'أُوقفت' : 'ملغاة', style: text.bodySmall),
+      ],
+    ])));
+  }
 }

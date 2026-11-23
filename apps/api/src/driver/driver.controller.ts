@@ -35,6 +35,8 @@ import * as tour from '../sectors/tour/tour';
 import { tourStage } from '../sectors/tour/tour.controller';
 import * as oilgas from '../sectors/oilgas/oilgas';
 import { oilgasStage } from '../sectors/oilgas/oilgas.controller';
+import * as cranes from '../sectors/cranes/cranes';
+import { liftsOpen, markLift } from '../sectors/cranes/cranes.controller';
 import { markStudent, schoolFinish } from '../sectors/school/school.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
@@ -357,7 +359,12 @@ export class DriverController {
                                ORDER BY x.stop_seq, x.name)
                         FROM ops.sch_student x LEFT JOIN LATERAL (SELECT k.event, k.received_by FROM ops.sch_mark k WHERE k.trip_id = st.id AND k.student_id = x.id ORDER BY k.occurred_at DESC LIMIT 1) m ON true
                        WHERE x.route_id = st.route_id AND (x.active OR m.event IS NOT NULL)), '[]'::jsonb))
-                     FROM ops.sch_trip st JOIN ops.sch_route r ON r.id = st.route_id WHERE st.task_id = t.id OR st.attendant_task_id = t.id) AS school
+                     FROM ops.sch_trip st JOIN ops.sch_route r ON r.id = st.route_id WHERE st.task_id = t.id OR st.attendant_task_id = t.id) AS school,
+                  (SELECT jsonb_agg(jsonb_build_object('id', l.id, 'ref', l.ref, 'time', l.lift_time::text, 'description', l.description, 'load_t', l.load_t, 'radius_m', l.radius_m,
+                          'rated_t', l.rated_t, 'utilization', l.utilization, 'critical', l.critical, 'approved', l.approved_at IS NOT NULL, 'status', l.status,
+                          'wind_limit_ms', coalesce(cs.wind_limit_ms, 9.8)) ORDER BY l.lift_time NULLS LAST, l.ref)
+                     FROM ops.crane_lift l JOIN ops.equip_hire h ON h.id = l.hire_id LEFT JOIN ops.crane_spec cs ON cs.asset_id = h.asset_id
+                    WHERE l.task_id = t.id AND l.status <> 'canceled') AS lifts
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE (t.status IN ('assigned','accepted','in_progress')
                    -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
@@ -383,7 +390,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board', 'student'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board', 'student', 'lift'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -423,6 +430,9 @@ export class DriverController {
       // a student boarded, absent or dropped on a school trip (school pack); dropping a young child going home names the adult
       if (type === 'student') return { ...base, type: 'student' as const, student_id: v.uuid(o.student_id, `ops[${i}].student_id`, { required: true })!,
         event: v.oneOf(o.event, `ops[${i}].event`, school.MARK_EVENTS, { required: true })!, received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 })?.trim() || null };
+      // a crane lift done (with the wind speed read on site) or aborted (with the reason), cranes pack
+      if (type === 'lift') return { ...base, type: 'lift' as const, lift_id: v.uuid(o.lift_id, `ops[${i}].lift_id`, { required: true })!,
+        event: v.oneOf(o.event, `ops[${i}].event`, cranes.LIFT_EVENTS, { required: true })!, wind_ms: cranes.parseWind(o.wind_ms, `ops[${i}].wind_ms`) };
       // a temperature reading on a cold-chain route (coldchain pack), typed by the driver from the truck's display
       if (type === 'temp') return { ...base, type: 'temp' as const, reading_c: dist.celsius(o.reading_c, `ops[${i}].reading_c`), stop_task_id: v.uuid(o.stop_task_id, `ops[${i}].stop_task_id`) };
       if (type === 'ticket') {
@@ -500,6 +510,7 @@ export class DriverController {
           }
           if (equipment.isEquipment(t.sector_pack)) {
             if (op.downtime_hours !== null && op.downtime_hours > 24) { reject('meter_invalid', t.status); continue; }
+            if (op.code === 'work_end') { const open = await liftsOpen(c, op.task_id); if (open) { reject(open, t.status); continue; } } // close or abort the day's lifts first
             const bad = await equipStage(c, op.task_id, op.code as equipment.Stage, { meter: op.meter_hours, downtime: op.downtime_hours, signedBy: op.received_by });
             if (bad) { reject(bad, t.status); continue; }
           }
@@ -587,6 +598,15 @@ export class DriverController {
         if (op.type === 'student') {
           if (!school.isSchool(t.sector_pack)) { reject('not_supported'); continue; }
           const bad = await markStudent(c, a, { taskId: op.task_id, studentId: op.student_id, event: op.event, receivedBy: op.received_by, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id });
+          if (bad) { reject(bad, t.status); continue; }
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
+          continue;
+        }
+
+        if (op.type === 'lift') {
+          if (!equipment.isEquipment(t.sector_pack)) { reject('not_supported'); continue; }
+          if (t.status !== 'in_progress') { reject('invalid_transition', t.status); continue; } // lifts happen during the working day
+          const bad = await markLift(c, a, { taskId: op.task_id, liftId: op.lift_id, event: op.event, wind: op.wind_ms, note: op.note, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id });
           if (bad) { reject(bad, t.status); continue; }
           results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
           continue;
@@ -702,6 +722,10 @@ export class DriverController {
             if (bad) { reject(bad, t.status); continue; }
           }
         }
+        if (equipment.isEquipment(t.sector_pack) && op.to_status === 'completed') {
+          const open = await liftsOpen(c, op.task_id);
+          if (open) { reject(open, t.status); continue; }
+        }
         if (oilgas.isOilgas(t.sector_pack) && op.to_status === 'completed'
           && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'og_arrived'`, [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue; // the journey ends with the arrival at the site
@@ -807,11 +831,12 @@ type SyncOp =
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
   | { type: 'student'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; student_id: string; event: school.MarkEvent; received_by: string | null }
+  | { type: 'lift'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; lift_id: string; event: cranes.LiftEvent; wind_ms: number | null }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board', student: 'ops.sch_mark' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board', student: 'ops.sch_mark', lift: 'ops.crane_lift_event' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;
