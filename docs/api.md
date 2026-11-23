@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -414,6 +414,27 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `POST /orders/:external_id/cancel`، `POST /orders/:external_id/return` | `{reason}` |
 
 المفتاح الخاطئ أو الملغى، أو المتجر الموقوف، أو الشركة الموقوفة، أو إيقاف النشاط: 401. المتجر يرى طلباته فقط.
+
+## قطاع النقل المدرسي school (القطاع 10)
+
+خطوط تنقل الطلاب بين البيوت والمدرسة (`to_school` صباحًا، `from_school` ظهرًا) بحافلة وسائق ومشرفة. كل يوم تُولَّد رحلة: مهمة للسائق والحافلة (`SC-<code>-<yyyymmdd>`) ومهمة للمشرفة (`…-A`)، حجز حصري للنافذة.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET/POST | `/school/routes` | الخطوط؛ الإنشاء يتطلب `school_name`، `code`، `direction`، `depart_time`، `stops`، واختياريًا `asset_id`، `driver_worker_id`، `attendant_worker_id` (supervisor) |
+| PATCH | `/school/routes/:id` | تعديل بالنسخة `version` |
+| GET/POST | `/school/routes/:id/students` | الطلاب (حتى 100): `name`، `grade`، `stop_seq`، `guardian_phone` إلزامي، `handover` افتراضيًا للروضة والصفوف 1-3 [تخمين] |
+| PATCH | `/school/students/:id` | تعديل الطالب أو إيقافه |
+| GET/POST | `/school/absences` | بلاغ غياب مسبق: `student_id`، `date`، `scope` (both، to_school، from_school)، `reported_by` |
+| DELETE | `/school/absences/:id` | سحب بلاغ ليومه لم يمضِ |
+| POST | `/school/trips/generate` | `{date, route_ids?}` لا يكرر؛ يتخطى بسبب (no_vehicle، no_driver، vehicle_booked، driver_booked، attendant_booked …) |
+| GET | `/school/trips?date=` ، `/school/trips/:id` | الرحلات وكشف الطلاب بحالة كل طالب (waiting، on_board، dropped، absent، excused) |
+| POST | `/school/trips/:id/mark` | تسجيل المكتب: `student_id`، `event` (boarded، absent، dropped)، `received_by` |
+| POST | `/school/trips/:id/cancel` | إلغاء الرحلة ومهمة المشرفة |
+| GET | `/school/exceptions?date=` | طلاب باقون في حافلة (`left_on_board`)، تأخر الانطلاق، بلا مشرفة، خطوط بلا رحلة، فوق السعة، غياب بلا بلاغ 3 رحلات |
+| GET | `/school/report?from=&to=` | لكل مدرسة: الرحلات، في الموعد، المنقولون، الغياب، البلاغات |
+
+من التطبيق: عملية `student` في `/driver/sync` (`student_id`، `event`، `received_by`) من السائق أو المشرفة. النزول بعد الصعود فقط (`not_on_board`)، والطفل المسلَّم في رحلة العودة يحتاج اسم المستلم (`receiver_required`). لا تُغلق الرحلة وفيها طالب (`students_on_board`) أو طالب متوقع لم يُسجَّل (`students_unmarked`).
 
 ## قطاع نقل الموظفين shuttle (القطاع 11)
 

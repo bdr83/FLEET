@@ -28,11 +28,13 @@ import { containerStage } from '../sectors/containers/containers.controller';
 import * as tankers from '../sectors/tankers/tankers';
 import { tankerStage } from '../sectors/tankers/tankers.controller';
 import { markRider } from '../sectors/shuttle/shuttle.controller';
+import * as school from '../sectors/school/school';
+import { markStudent, schoolFinish } from '../sectors/school/school.controller';
 import { addReading, parseProof, ProofIn, routeOut, routeStage, stopProof } from '../sectors/distribution/distribution.controller';
 
 /** Stage codes and failure reasons of every pack; each op is checked against its own task's pack when applied. */
 const ALL_STAGES = [...new Set<string>([...STAGES, ...concrete.STAGES, ...staffing.STAGES, ...internal.STAGES, ...dist.STAGES, ...freight.STAGES, ...equipment.STAGES, ...rental.STAGES, ...service.STAGES, ...moving.STAGES, ...containers.STAGES, ...tankers.STAGES])];
-const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS])];
+const ALL_REASONS = [...new Set<string>([...FAIL_REASONS, ...concrete.FAIL_REASONS, ...staffing.FAIL_REASONS, ...internal.FAIL_REASONS, ...dist.FAIL_REASONS, ...freight.FAIL_REASONS, ...shuttle.FAIL_REASONS, ...equipment.FAIL_REASONS, ...rental.FAIL_REASONS, ...service.FAIL_REASONS, ...moving.FAIL_REASONS, ...containers.FAIL_REASONS, ...tankers.FAIL_REASONS, ...school.FAIL_REASONS])];
 function stageRule(pack: string, code: string): { allowed: string[]; needs?: string } | null {
   if (isDelivery(pack)) return (STAGES as readonly string[]).includes(code) ? { allowed: STAGE_ALLOWED[code as keyof typeof STAGE_ALLOWED] } : null;
   if (staffing.isStaffing(pack)) {
@@ -82,7 +84,7 @@ function stageRule(pack: string, code: string): { allowed: string[]; needs?: str
 }
 function reasonsOf(pack: string): readonly string[] | null {
   return isDelivery(pack) ? FAIL_REASONS : concrete.isConcrete(pack) ? concrete.FAIL_REASONS : staffing.isStaffing(pack) ? staffing.FAIL_REASONS
-    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : null;
+    : internal.isInternal(pack) ? internal.FAIL_REASONS : dist.isDistribution(pack) ? dist.FAIL_REASONS : freight.isFreight(pack) ? freight.FAIL_REASONS : shuttle.isShuttle(pack) ? shuttle.FAIL_REASONS : equipment.isEquipment(pack) ? equipment.FAIL_REASONS : rental.isRental(pack) ? rental.FAIL_REASONS : service.isService(pack) ? service.FAIL_REASONS : moving.isMoving(pack) ? moving.FAIL_REASONS : containers.isContainers(pack) ? containers.FAIL_REASONS : tankers.isTankers(pack) ? tankers.FAIL_REASONS : school.isSchool(pack) ? school.FAIL_REASONS : null;
 }
 
 /** Device clocks drift and the app queues data offline: accept up to 7 days back and 5 minutes ahead. */
@@ -329,7 +331,15 @@ export class DriverController {
                       SELECT jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'staff_no', x.staff_no, 'phone', x.phone, 'stop_seq', x.stop_seq, 'event', m.event) ORDER BY x.stop_seq, x.name)
                         FROM ops.shuttle_rider x LEFT JOIN LATERAL (SELECT b.event FROM ops.shuttle_board b WHERE b.trip_id = st.id AND b.rider_id = x.id ORDER BY b.occurred_at DESC LIMIT 1) m ON true
                        WHERE x.route_id = st.route_id AND (x.active OR m.event IS NOT NULL)), '[]'::jsonb))
-                     FROM ops.shuttle_trip st WHERE st.task_id = t.id) AS shuttle
+                     FROM ops.shuttle_trip st WHERE st.task_id = t.id) AS shuttle,
+                  (SELECT jsonb_build_object('trip_id', st.id, 'students', COALESCE((
+                      SELECT jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'grade', x.grade, 'stop_seq', x.stop_seq, 'guardian_name', x.guardian_name,
+                               'guardian_phone', x.guardian_phone, 'handover', x.handover, 'note', x.note, 'event', m.event, 'received_by', m.received_by,
+                               'excused', EXISTS (SELECT 1 FROM ops.sch_absence ab WHERE ab.student_id = x.id AND ab.day = st.trip_date AND ab.scope IN ('both', r.direction)))
+                               ORDER BY x.stop_seq, x.name)
+                        FROM ops.sch_student x LEFT JOIN LATERAL (SELECT k.event, k.received_by FROM ops.sch_mark k WHERE k.trip_id = st.id AND k.student_id = x.id ORDER BY k.occurred_at DESC LIMIT 1) m ON true
+                       WHERE x.route_id = st.route_id AND (x.active OR m.event IS NOT NULL)), '[]'::jsonb))
+                     FROM ops.sch_trip st JOIN ops.sch_route r ON r.id = st.route_id WHERE st.task_id = t.id OR st.attendant_task_id = t.id) AS school
              FROM ops.task t JOIN ops.assignment asg ON asg.task_id = t.id AND asg.active AND asg.worker_id = $1
             WHERE (t.status IN ('assigned','accepted','in_progress')
                    -- a placement books weeks of day-shifts ahead; the driver sees only those starting within 36 hours (and not long over)
@@ -355,7 +365,7 @@ export class DriverController {
     if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS) throw new BadRequestException(`ops must be a list of 1-${MAX_OPS}`);
     const parsed: SyncOp[] = ops.map((o: Record<string, unknown>, i: number) => {
       if (!o || typeof o !== 'object') throw new BadRequestException(`ops[${i}] invalid`);
-      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board'] as const, { required: true })!;
+      const type = v.oneOf(o.type, `ops[${i}].type`, ['task_status', 'milestone', 'pod', 'ticket', 'stop', 'temp', 'board', 'student'] as const, { required: true })!;
       const base = {
         type,
         client_op_id: v.uuid(o.client_op_id, `ops[${i}].client_op_id`, { required: true })!,
@@ -386,6 +396,9 @@ export class DriverController {
       if (type === 'stop') return { ...base, type: 'stop' as const, proof: parseProof(o, `ops[${i}]`) };
       // a rider boarded or absent on a staff-transport trip (shuttle pack)
       if (type === 'board') return { ...base, type: 'board' as const, rider_id: v.uuid(o.rider_id, `ops[${i}].rider_id`, { required: true })!, event: v.oneOf(o.event, `ops[${i}].event`, shuttle.BOARD_EVENTS, { required: true })! };
+      // a student boarded, absent or dropped on a school trip (school pack); dropping a young child going home names the adult
+      if (type === 'student') return { ...base, type: 'student' as const, student_id: v.uuid(o.student_id, `ops[${i}].student_id`, { required: true })!,
+        event: v.oneOf(o.event, `ops[${i}].event`, school.MARK_EVENTS, { required: true })!, received_by: v.str(o.received_by, `ops[${i}].received_by`, { max: 120 })?.trim() || null };
       // a temperature reading on a cold-chain route (coldchain pack), typed by the driver from the truck's display
       if (type === 'temp') return { ...base, type: 'temp' as const, reading_c: dist.celsius(o.reading_c, `ops[${i}].reading_c`), stop_task_id: v.uuid(o.stop_task_id, `ops[${i}].stop_task_id`) };
       if (type === 'ticket') {
@@ -535,6 +548,14 @@ export class DriverController {
           continue;
         }
 
+        if (op.type === 'student') {
+          if (!school.isSchool(t.sector_pack)) { reject('not_supported'); continue; }
+          const bad = await markStudent(c, a, { taskId: op.task_id, studentId: op.student_id, event: op.event, receivedBy: op.received_by, at: op.occurred_at, source: 'driver', clientOpId: op.client_op_id });
+          if (bad) { reject(bad, t.status); continue; }
+          results.push({ client_op_id: op.client_op_id, result: 'applied', status: t.status });
+          continue;
+        }
+
         if (op.type === 'stop') {
           if (!dist.isDistribution(t.sector_pack) || t.attributes?.kind !== 'stop') { reject('not_supported'); continue; }
           await c.query('SAVEPOINT op');
@@ -636,6 +657,10 @@ export class DriverController {
           && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'work_done'`, [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue; // the visit ends with its result
         }
+        if (school.isSchool(t.sector_pack) && op.to_status === 'completed') {
+          const bad = await schoolFinish(c, op.task_id); // nobody left on the bus, every expected student marked
+          if (bad) { reject(bad, t.status); continue; }
+        }
         if (tankers.isTankers(t.sector_pack) && op.to_status === 'completed'
           && !(await c.query(`SELECT 1 FROM ops.task_milestone WHERE task_id = $1 AND code = 'tank_discharged'`, [op.task_id])).rowCount) {
           reject('proof_required', t.status); continue; // the trip ends with the litres discharged
@@ -728,11 +753,12 @@ type SyncOp =
       weight_kg: number | null; seal_no: string | null; received_by: string | null; file_key: string | null; meter_hours: number | null; downtime_hours: number | null; result: string | null; parts: unknown; container_no: string | null; gate_ref: string | null; litres: number | null }
   | { type: 'stop'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; proof: ProofIn }
   | { type: 'board'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; rider_id: string; event: 'boarded' | 'no_show' }
+  | { type: 'student'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; student_id: string; event: school.MarkEvent; received_by: string | null }
   | { type: 'temp'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; reading_c: number; stop_task_id: string | null }
   | { type: 'ticket'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; poured_m3: number; returned_m3: number; signed_by: string; file_key: string | null }
   | { type: 'pod'; client_op_id: string; task_id: string; occurred_at: Date; note: string | null; method: 'pin' | 'photo' | 'signature'; pin: string | null; file_key: string | null; recipient_name: string | null };
 
-const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board' } as const;
+const DUP_TABLE = { task_status: 'ops.task_event', milestone: 'ops.task_milestone', pod: 'ops.delivery_pod', ticket: 'ops.load_ticket', stop: 'ops.dist_stop', temp: 'ops.temp_reading', board: 'ops.shuttle_board', student: 'ops.sch_mark' } as const;
 async function isDuplicate(c: PoolClient, op: SyncOp) {
   const col = op.type === 'ticket' ? 'sign_client_op_id' : 'client_op_id';
   return !!(await c.query(`SELECT 1 FROM ${DUP_TABLE[op.type]} WHERE ${col} = $1`, [op.client_op_id])).rowCount;

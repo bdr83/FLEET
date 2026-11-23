@@ -47,6 +47,7 @@ class DriverTask {
     this.ticket,
     this.freight,
     this.shuttle,
+    this.school,
   });
   final String id, status, sectorPack;
   final String? taskRef;
@@ -61,6 +62,8 @@ class DriverTask {
   final Map<String, dynamic>? freight;
   /// Staff transport trips: {trip_id, riders: [{id, name, staff_no, phone, stop_seq, event}]}.
   final Map<String, dynamic>? shuttle;
+  /// School trips: {trip_id, students: [{id, name, grade, stop_seq, guardian_name, guardian_phone, handover, note, event, received_by, excused}]}.
+  final Map<String, dynamic>? school;
 
   factory DriverTask.fromJson(Map<String, dynamic> j) => DriverTask(
         id: j['id'],
@@ -76,10 +79,11 @@ class DriverTask {
         ticket: _map(j['ticket']),
         freight: _map(j['freight']),
         shuttle: _map(j['shuttle']),
+        school: _map(j['school']),
       );
 
   /// A local copy after an action the server has not confirmed yet (offline).
-  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle}) => DriverTask(
+  DriverTask copyWith({String? status, String? stage, bool? hasProof, Map<String, dynamic>? ticket, Map<String, dynamic>? shuttle, Map<String, dynamic>? school}) => DriverTask(
         id: id,
         status: status ?? this.status,
         sectorPack: sectorPack,
@@ -93,11 +97,25 @@ class DriverTask {
         ticket: ticket ?? this.ticket,
         freight: freight,
         shuttle: shuttle ?? this.shuttle,
+        school: school ?? this.school,
       );
 
   bool get isDelivery => sectorPack == 'delivery@1';
   /// A staff-transport trip (shuttle pack): stops with times and the riders to mark boarded or absent.
   bool get isShuttle => sectorPack == 'shuttle@1';
+  /// A school trip (school pack), for the driver or the attendant: stops with times and the students to mark boarded,
+  /// absent or dropped; a young child going home is handed to a named adult; the trip ends with nobody on the bus.
+  bool get isSchool => sectorPack == 'school@1';
+  bool get toSchool => attributes['direction'] != 'from_school';
+  bool get isAttendant => attributes['kind'] == 'attend';
+  List<Student> get students => [for (final x in (school?['students'] as List? ?? const [])) if (x is Map) Student.fromJson(Map<String, dynamic>.from(x))];
+  /// Why the trip cannot end yet (same rule as the server), or null.
+  String? get schoolFinishBlock {
+    final st = students.map((x) => x.state).toList();
+    if (st.contains('on_board')) return 'students_on_board';
+    if (st.contains('waiting')) return 'students_unmarked';
+    return null;
+  }
   /// A working day of a hired machine (equipment pack): hour meter at the start and end, downtime and the site supervisor.
   bool get isEquipment => sectorPack == 'equipment@1';
   double? get minHours => _num(attributes['min_hours']);
@@ -493,6 +511,8 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                 ? (distActionLabels[a] ?? actionLabels[a]!)
                 : t.isShuttle
                     ? (shuttleActionLabels[a] ?? actionLabels[a]!)
+                    : t.isSchool
+                    ? (schoolActionLabels[a] ?? actionLabels[a]!)
                     : t.isEquipment
                         ? (equipmentActionLabels[a] ?? actionLabels[a]!)
                         : t.isService
@@ -668,6 +688,37 @@ const shuttleFailReasons = {
   'other': 'سبب آخر',
 };
 
+const schoolActionLabels = {
+  TaskAction.accept: 'قبول الرحلة',
+  TaskAction.start: 'انطلقت',
+  TaskAction.complete: 'وصلت وأنهيت الرحلة',
+  TaskAction.fail: 'تعذّر تشغيل الرحلة',
+};
+
+/// Same codes as the API (school FAIL_REASONS).
+const schoolFailReasons = {
+  'vehicle_breakdown': 'عطل في الحافلة',
+  'accident': 'حادث',
+  'road_closed': 'الطريق مغلق',
+  'school_closed': 'المدرسة مغلقة',
+  'other': 'سبب آخر',
+};
+
+/// A student on a school trip and where they stand: waiting, on_board, dropped, absent, or excused (absence notice).
+class Student {
+  Student({required this.id, required this.name, this.grade, required this.stopSeq, this.guardianName, this.guardianPhone, this.handover = false, this.note, this.event, this.receivedBy, this.excused = false});
+  factory Student.fromJson(Map<String, dynamic> j) => Student(id: j['id'] as String, name: j['name'] as String? ?? '', grade: j['grade'] as String?,
+      stopSeq: (j['stop_seq'] as num?)?.toInt() ?? 1, guardianName: j['guardian_name'] as String?, guardianPhone: j['guardian_phone'] as String?,
+      handover: j['handover'] == true, note: j['note'] as String?, event: j['event'] as String?, receivedBy: j['received_by'] as String?, excused: j['excused'] == true);
+  final String id, name;
+  final String? grade, guardianName, guardianPhone, note, event, receivedBy;
+  final int stopSeq;
+  final bool handover, excused;
+  String get state => event == 'boarded' ? 'on_board' : event == 'dropped' ? 'dropped' : event == 'absent' ? 'absent' : excused ? 'excused' : 'waiting';
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'grade': grade, 'stop_seq': stopSeq, 'guardian_name': guardianName, 'guardian_phone': guardianPhone,
+      'handover': handover, 'note': note, 'event': event, 'received_by': receivedBy, 'excused': excused};
+}
+
 /// A stop of a staff-transport route with its planned time.
 class ShuttleStop {
   ShuttleStop({required this.name, this.area, required this.time});
@@ -820,7 +871,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isSchool ? schoolFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
@@ -898,6 +949,11 @@ const rejectReasons = {
   'item_not_planned': 'صنف غير مخطط لهذا التوقف',
   'cash_required': 'أدخل المبلغ المحصّل',
   'unknown_rider': 'الراكب ليس على هذا الخط، حدّث القائمة',
+  'unknown_student': 'الطالب ليس على هذا الخط، حدّث القائمة',
+  'students_on_board': 'ما زال طالب في الحافلة، سجّل نزوله قبل إنهاء الرحلة',
+  'students_unmarked': 'سجّل صعود كل طالب أو غيابه قبل إنهاء الرحلة',
+  'not_on_board': 'الطالب لم يُسجَّل صعوده',
+  'already_on_board': 'الطالب في الحافلة، سجّل نزوله أولًا',
   'meter_required': 'أدخل قراءة عدّاد الساعات',
   'meter_too_low': 'العدّاد أقل من آخر قراءة مسجّلة للمعدة',
   'meter_invalid': 'قراءة الانتهاء يجب أن تكون بعد قراءة البدء وخلال 24 ساعة',

@@ -206,6 +206,10 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isSchool) ...[
+          _SchoolCard(t: t),
+          const SizedBox(height: 12),
+        ],
         if (t.isShuttle) ...[
           _ShuttleCard(t: t),
           const SizedBox(height: 12),
@@ -362,7 +366,13 @@ class _ActionsState extends State<_Actions> {
     switch (action) {
       case TaskAction.accept: await s.setStatus(task.id, 'accepted');
       case TaskAction.start: await s.setStatus(task.id, 'in_progress');
-      case TaskAction.complete: await s.setStatus(task.id, 'completed');
+      case TaskAction.complete:
+        final block = task.isSchool ? task.schoolFinishBlock : null;
+        if (block != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(rejectReasons[block] ?? block)));
+          return;
+        }
+        await s.setStatus(task.id, 'completed');
       case TaskAction.atPickup: await s.milestone(task.id, 'at_pickup');
       case TaskAction.pickedUp:
         await s.milestone(task.id, 'picked_up');
@@ -746,6 +756,77 @@ class _ActionsState extends State<_Actions> {
     }
     await s.setStatus(task.id, 'failed', reasonCode: reason, note: note.text.trim().isEmpty ? null : note.text.trim());
     if (context.mounted) toast(context, task.isDelivery ? 'سُجّل التعذّر. أعد الشحنة للمرسل ثم سجّل الإرجاع' : 'سُجّل التعذّر');
+  }
+}
+
+/// School trip: the stops with their times and, under each, the students to mark boarded, absent or dropped. A child
+/// going home who is handed over asks for the adult's name. The count on top shows who is still on the bus.
+class _SchoolCard extends StatelessWidget {
+  const _SchoolCard({required this.t});
+  final DriverTask t;
+
+  Future<void> _drop(BuildContext context, Student x) async {
+    final s = AppScope.of(context);
+    if (t.toSchool || !x.handover) return s.markStudent(t.id, x.id, 'dropped');
+    final ctl = TextEditingController(text: x.guardianName ?? '');
+    final name = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: Text('تسليم ${x.name}'),
+      content: TextField(key: const Key('received-by'), controller: ctl, autofocus: true, decoration: const InputDecoration(labelText: 'اسم من استلم الطفل')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+        FilledButton(key: const Key('handover-ok'), onPressed: () => Navigator.pop(ctx, ctl.text.trim()), child: const Text('تم التسليم')),
+      ],
+    ));
+    if (name == null || name.isEmpty) return;
+    await s.markStudent(t.id, x.id, 'dropped', receivedBy: name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final stops = t.shuttleStops;
+    final kids = t.students;
+    final open = ['accepted', 'in_progress'].contains(t.status);
+    int n(String st) => kids.where((x) => x.state == st).length;
+    final onBoard = n('on_board');
+    return Card(key: const Key('school-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text('${t.toSchool ? 'نقل مدرسي: إلى المدرسة' : 'نقل مدرسي: إلى البيوت'} · ${t.attributes['route_code'] ?? ''}${t.isAttendant ? ' · المشرفة' : ''}', style: text.labelMedium),
+      Text('${t.attributes['school_name'] ?? ''}', style: text.titleLarge),
+      Text('${t.attributes['route_name'] ?? ''}'),
+      const SizedBox(height: 6),
+      Text('في الحافلة $onBoard · نزل ${n('dropped')} · غائب ${n('absent') + n('excused')} · لم يُسجَّل ${n('waiting')}',
+          key: const Key('school-count'), style: TextStyle(fontWeight: FontWeight.bold, color: onBoard > 0 && t.status == 'in_progress' ? scheme.primary : null)),
+      if (!open && t.status == 'assigned') const Padding(padding: EdgeInsets.only(top: 4), child: Text('اقبل الرحلة لتسجيل صعود الطلاب')),
+      for (final (i, st) in stops.indexed) ...[
+        const Divider(),
+        Row(children: [
+          Ltr(st.time, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(st.area != null ? '${st.name} · ${st.area}' : st.name, style: text.titleMedium)),
+        ]),
+        for (final x in kids.where((x) => x.stopSeq == i + 1))
+          Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(switch (x.state) { 'on_board' => Icons.directions_bus, 'dropped' => Icons.check_circle, 'absent' || 'excused' => Icons.cancel_outlined, _ => Icons.radio_button_unchecked },
+                  size: 20, color: switch (x.state) { 'on_board' => scheme.primary, 'dropped' => Colors.green, 'absent' || 'excused' => scheme.error, _ => null }),
+              const SizedBox(width: 6),
+              Expanded(child: Text('${x.name}${x.grade != null ? ' · ${x.grade}' : ''}${x.handover ? ' · يُسلَّم' : ''}${x.excused && x.event == null ? ' · بلّغ بالغياب' : ''}')),
+              if (open && x.state != 'on_board' && x.state != 'dropped') ...[
+                Semantics(button: true, label: 'صعد ${x.name}', excludeSemantics: true, child: TextButton(onPressed: () => s.markStudent(t.id, x.id, 'boarded'), child: const Text('صعد'))),
+                if (x.state != 'absent') Semantics(button: true, label: 'غائب ${x.name}', excludeSemantics: true, child: TextButton(onPressed: () => s.markStudent(t.id, x.id, 'absent'), child: const Text('غائب'))),
+              ],
+              if (open && x.state == 'on_board')
+                Semantics(button: true, label: 'نزل ${x.name}', excludeSemantics: true, child: TextButton(onPressed: () => _drop(context, x), child: const Text('نزل'))),
+            ]),
+            if (x.note != null) Padding(padding: const EdgeInsetsDirectional.only(start: 26), child: Text(x.note!, style: TextStyle(color: scheme.error))),
+            if (x.receivedBy != null) Padding(padding: const EdgeInsetsDirectional.only(start: 26), child: Text('استلمه: ${x.receivedBy}')),
+            if (x.guardianPhone != null && x.state != 'dropped')
+              Padding(padding: const EdgeInsetsDirectional.only(start: 26), child: Row(children: [Text('ولي الأمر${x.guardianName != null ? ' (${x.guardianName})' : ''}: '), Ltr(x.guardianPhone!)])),
+          ])),
+      ],
+    ])));
   }
 }
 

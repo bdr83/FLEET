@@ -58,6 +58,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'tankers', sector: 7, label: 'صهاريج المياه والديزل والوقود', hint: 'طلبات توصيل الماء والديزل باللتر، صهاريج ماء ووقود بسعاتها، اللترات المعبأة والمفرّغة، الفاقد، الطلبات الثابتة' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين', hint: 'مواقع تخزين، استلام وصرف، أقدم صلاحية أولًا، جرد، تخزين للعملاء' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
+  { code: 'school', sector: 10, label: 'النقل المدرسي', hint: 'خطوط صباحية وظهرية، طلاب وأولياء أمور، مشرفة، صعود ونزول وتسليم الطفل، بلاغات غياب، تنبيه طالب باقٍ في الحافلة' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
   { code: 'staffing', sector: 14, label: 'توفير السائقين والمندوبين', hint: 'إسناد سائقين لعملاء، حضور، كشوف ساعات' },
   { code: 'equipment', sector: 16, label: 'تأجير المعدات الثقيلة', hint: 'تأجير بمشغّل أو بدونه، أيام عمل محجوزة، عدّاد الساعات، حد أدنى يومي، اعتماد الساعات' },
@@ -276,6 +277,16 @@ export const SHUTTLE_SKIP: Record<string, string> = {
   no_vehicle: 'بلا حافلة', no_driver: 'بلا سائق', vehicle_booked: 'الحافلة محجوزة في الوقت نفسه', driver_booked: 'السائق مشغول في الوقت نفسه',
   vehicle_out_of_service: 'الحافلة خارج الخدمة', driver_inactive: 'السائق غير نشط', past: 'موعد الرحلة مضى', not_generated: 'لم تُولَّد رحلته',
 };
+
+/** School transport (school pack) labels. */
+export const SCHOOL_DIRECTION: Record<string, string> = { to_school: 'إلى المدرسة', from_school: 'إلى البيوت' };
+export const SCHOOL_SKIP: Record<string, string> = { ...SHUTTLE_SKIP, attendant_booked: 'المشرفة مشغولة في الوقت نفسه' };
+export const SCHOOL_STATE: Record<string, { label: string; tone: string }> = {
+  waiting: { label: 'لم يُسجَّل', tone: 'muted' }, on_board: { label: 'في الحافلة', tone: 'info' }, dropped: { label: 'نزل', tone: 'success' },
+  absent: { label: 'غائب', tone: 'warning' }, excused: { label: 'بلّغ بالغياب', tone: 'muted' },
+};
+export const ABSENCE_SCOPE: Record<string, string> = { both: 'الذهاب والعودة', to_school: 'الذهاب فقط', from_school: 'العودة فقط' };
+export const REPORTED_BY: Record<string, string> = { guardian: 'ولي الأمر', school: 'المدرسة', office: 'المكتب' };
 
 /** Heavy equipment hire (equipment pack) labels. */
 export const RATE_UNIT: Record<string, string> = { hour: 'بالساعة', day: 'باليوم', month: 'بالشهر' };
