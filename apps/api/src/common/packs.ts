@@ -6,6 +6,7 @@ export const PACKS = [
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع' },
   { code: 'moving', sector: 5, label: 'نقل الأثاث' },
   { code: 'containers', sector: 6, label: 'الحاويات والموانئ' },
+  { code: 'tankers', sector: 7, label: 'صهاريج المياه والديزل والوقود' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين' },

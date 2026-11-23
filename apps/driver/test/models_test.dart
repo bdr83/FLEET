@@ -292,6 +292,20 @@ void main() {
     expect(normContainer('MSCU1234566'), 'MSCU1234566');
   });
 
+  test('tanker trip: fill then discharge; litres typed', () {
+    final t = task('assigned', pack: 'tankers@1', attrs: {'kind': 'tank', 'product': 'diesel', 'qty_l': 5000, 'capacity_l': 20000, 'address': 'حولي، ق 2'});
+    expect((t.isTanker, t.product, t.qtyL, t.capacityL, t.address), (true, 'diesel', 5000, 20000, 'حولي، ق 2'));
+    expect(nextActions(t.copyWith(status: 'in_progress')), [TaskAction.tankFilled, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'tank_filled')), [TaskAction.tankDischarged, TaskAction.fail]);
+    expect(nextActions(t.copyWith(status: 'in_progress', stage: 'tank_discharged')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.tankFilled), 'تمت التعبئة');
+    expect(failReasonsFor(t), tankerFailReasons);
+    expect(parseLitres('10,000'), 10000);
+    expect(parseLitres('٥٠٠٠'), 5000);
+    expect(parseLitres('70000'), isNull);
+    expect(parseLitres('1.5'), isNull);
+  });
+
   test('courier parcel line', () {
     expect(task('assigned', attrs: {'awb': 'KW1234567890', 'pieces': 2, 'attempt': 1, 'max_attempts': 3}).parcelLine, '2 قطع');
     expect(task('assigned', attrs: {'awb': 'TST-1', 'pieces': 1, 'attempt': 2, 'max_attempts': 3}).parcelLine, '1 قطعة · المحاولة 2 من 3');

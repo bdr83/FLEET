@@ -26,6 +26,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/moving', label: 'نقل الأثاث', perm: 'tasks:read', pack: 'moving' },
   { href: '/containers', label: 'الحاويات', perm: 'tasks:read', pack: 'containers' },
+  { href: '/tankers', label: 'الصهاريج', perm: 'tasks:read', pack: 'tankers' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },

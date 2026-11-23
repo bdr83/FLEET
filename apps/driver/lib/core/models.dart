@@ -114,6 +114,11 @@ class DriverTask {
   bool get isContainer => sectorPack == 'containers@1';
   String? get containerNo => attributes['container_no'] as String?;
   bool get needsGateRef => attributes['gate'] == true;
+  /// A tanker trip (tankers pack): fill (litres, the source), then discharge (litres, the receiver).
+  bool get isTanker => sectorPack == 'tankers@1';
+  String? get product => attributes['product'] as String?;
+  int? get qtyL => (attributes['qty_l'] as num?)?.toInt();
+  int? get capacityL => (attributes['capacity_l'] as num?)?.toInt();
   List<String> get fragileItems => [for (final x in (attributes['fragile'] as List? ?? const [])) if (x is String) x];
   String? get problem => attributes['problem'] as String?;
   String? get category => attributes['category'] as String?;
@@ -175,7 +180,7 @@ class DriverTask {
   Map<String, dynamic>? get pickup => _map(attributes['pickup']);
   String? get recipientName => _map(attributes['recipient'])?['name'] ?? attributes['recipient_name'];
   String? get recipientPhone => _map(attributes['recipient'])?['phone'] ?? _map(attributes['dropoff'])?['phone'] ?? attributes['recipient_phone'];
-  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
+  String get address => (isConcrete || isStaffing || isInternal || isDistribution || isFreight || isRental || isService || isMoving || isMoveCrew || isContainer || isTanker ? attributes['address'] as String? : null) ?? addressLine(dropoff) ?? (attributes['address'] as String?) ?? '';
   String? get notes => (dropoff?['notes'] as String?) ?? attributes['notes'] as String?;
   String? get ref => taskRef ?? attributes['external_order_id'] as String?;
 
@@ -249,7 +254,7 @@ int moneyToFils(Object? v) {
 String filsToMoney(int fils) => '${fils ~/ 1000}.${(fils % 1000).toString().padLeft(3, '0')}';
 
 /// What the driver can do next on a task, in the order the buttons appear.
-enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped }
+enum TaskAction { unloaded, accept, atPickup, pickedUp, start, atDropoff, deliver, complete, fail, returned, loaded, atSite, pourStart, pourEnd, ticket, checkIn, checkOut, vehicleOut, vehicleBack, loadChecked, depart, stopDeliver, routeBack, workStart, workEnd, handover, collected, arrived, workDone, ctrPicked, ctrDropped, tankFilled, tankDischarged }
 
 List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isConcrete) return _concreteActions(t);
@@ -261,6 +266,7 @@ List<TaskAction> nextActions(DriverTask t, {DateTime? now}) {
   if (t.isService) return _serviceActions(t);
   if (t.isMoving) return _movingActions(t);
   if (t.isContainer) return _containerActions(t);
+  if (t.isTanker) return _tankerActions(t);
   if (t.isRoute) return _routeActions(t);
   if (t.isStop) return ['accepted', 'in_progress'].contains(t.status) ? [TaskAction.stopDeliver, TaskAction.fail] : [];
   switch (t.status) {
@@ -422,6 +428,27 @@ List<TaskAction> _containerActions(DriverTask t) {
   }
 }
 
+/// Tanker trip: accept → on the way → filled (litres, source) → discharged (litres, receiver; ends the trip).
+List<TaskAction> _tankerActions(DriverTask t) {
+  switch (t.status) {
+    case 'assigned':
+      return [TaskAction.accept];
+    case 'accepted':
+      return [TaskAction.start];
+    case 'in_progress':
+      return t.stage == 'tank_discharged' ? [TaskAction.complete] : t.stage == 'tank_filled' ? [TaskAction.tankDischarged, TaskAction.fail] : [TaskAction.tankFilled, TaskAction.fail];
+    default:
+      return [];
+  }
+}
+
+/// Litres typed by the driver: a whole number 0-60000 (Arabic digits and thousands commas accepted).
+int? parseLitres(String raw) {
+  final s = raw.trim().replaceAllMapped(RegExp('[٠-٩]'), (m) => '${m[0]!.codeUnitAt(0) - 0x0660}').replaceAll(RegExp('[,٬]'), '');
+  final n = int.tryParse(s);
+  return n == null || n < 0 || n > 60000 ? null : n;
+}
+
 /// ISO 6346 container number with its check digit (spaces and dashes dropped); null when invalid.
 String? normContainer(String raw) {
   final s = raw.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
@@ -474,11 +501,34 @@ String actionLabel(DriverTask t, TaskAction a) => t.isConcrete
                             ? (movingActionLabels[a] ?? actionLabels[a]!)
                             : t.isContainer
                             ? (containerActionLabels[a] ?? actionLabels[a]!)
+                            : t.isTanker
+                            ? (tankerActionLabels[a] ?? actionLabels[a]!)
                             : t.isMoveCrew
                             ? (moveCrewActionLabels[a] ?? actionLabels[a]!)
                             : t.isRental
                             ? ((t.isCollect && a == TaskAction.start ? 'انطلقت لاستلام السيارة' : null) ?? rentalActionLabels[a] ?? actionLabels[a]!)
                             : actionLabels[a]!;
+
+const tankerActionLabels = {
+  TaskAction.accept: 'قبول الطلب',
+  TaskAction.start: 'انطلقت للتعبئة',
+  TaskAction.tankFilled: 'تمت التعبئة',
+  TaskAction.tankDischarged: 'تم التفريغ',
+  TaskAction.complete: 'إنهاء الطلب',
+  TaskAction.fail: 'تعذّر التوصيل',
+};
+
+/// Same codes as the API (tankers FAIL_REASONS).
+const tankerFailReasons = {
+  'customer_absent': 'العميل غير موجود',
+  'no_access': 'تعذّر الوصول للخزان',
+  'tank_full': 'الخزان ممتلئ',
+  'source_closed': 'محطة التعبئة مغلقة',
+  'truck_breakdown': 'عطل الصهريج',
+  'customer_canceled': 'ألغى العميل',
+  'other': 'سبب آخر',
+};
+const tankerProductLabels = {'water_fresh': 'ماء عذب', 'water_brackish': 'ماء صليبي', 'diesel': 'ديزل', 'kerosene': 'كيروسين'};
 
 const containerActionLabels = {
   TaskAction.accept: 'قبول الرحلة',
@@ -770,7 +820,7 @@ const staffingFailReasons = {
 
 /// The failure reasons offered for the task's kind, or null when a free-text reason is asked.
 Map<String, String>? failReasonsFor(DriverTask t) =>
-    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isDelivery ? failReasons : null;
+    t.isConcrete ? concreteFailReasons : t.isFreight ? freightFailReasons : t.isStaffing ? staffingFailReasons : t.isInternal ? internalFailReasons : t.isDistribution ? distFailReasons : t.isShuttle ? shuttleFailReasons : t.isEquipment ? equipmentFailReasons : t.isRental ? rentalFailReasons : t.isService ? serviceFailReasons : t.isMoving || t.isMoveCrew ? movingFailReasons : t.isContainer ? containerFailReasons : t.isTanker ? tankerFailReasons : t.isDelivery ? failReasons : null;
 
 /// Same codes as the API (internal FAIL_REASONS).
 const internalFailReasons = {
