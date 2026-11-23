@@ -24,6 +24,7 @@ export const PACKS = [
   { code: 'waste', sector: 23, label: 'جمع النفايات والتنظيف' },
   { code: 'utilities', sector: 24, label: 'المرافق: الكهرباء والماء والاتصالات' },
   { code: 'security', sector: 25, label: 'الحراسة والدوريات' },
+  { code: 'pest', sector: 26, label: 'مكافحة الحشرات والقوارض' },
   { code: 'distribution', sector: 29, label: 'التوزيع للمصانع والمطاعم والتجزئة' },
 ] as const;
 export type PackCode = (typeof PACKS)[number]['code'];

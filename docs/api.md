@@ -644,6 +644,24 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 من التطبيق: مهمة `security@1` تحمل `kind: patrol` و`site_code`، `site_name`، `slot`، `checkpoints`، `instructions`، `address`، و`security` (النقاط بتسجيلها وعدد الحوادث). عمليتا مزامنة أثناء الجولة: `{type: 'scan', checkpoint_id, event, tag, reason, lat, lng}` و`{type: 'incident', category, severity, note (الوصف), lat, lng}`. الرفض: `tag_required`، `tag_mismatch`، `skip_reason_required`، `unknown_checkpoint`، `category_required`، `description_required`. لا تكتمل الجولة قبل تسجيل كل النقاط (`checkpoints_open`). أسباب التعذّر: site_closed، guard_unwell، vehicle_breakdown، emergency_elsewhere، other.
 
+## قطاع مكافحة الحشرات والقوارض pest (القطاع 26)
+
+سجل المبيدات: لكل مبيد المادة الفعالة ورقم التسجيل لدى الجهة المختصة والوحدة (ml، l، g، kg، unit) ومدة منع الدخول بالساعات. أمر المكافحة (`PC-n`) لعميل: نوع المنشأة (home، restaurant، office، warehouse، hospital، school، other)، والآفات (cockroaches، ants، rodents، termites، bedbugs، mosquitoes، flies، birds، scorpions_snakes، other)، والخدمة (spray، gel، bait، fumigation، inspection)، والموعد والمدة، والضمان بالأيام (افتراضيًا 30 [تخمين])، والعقد الدوري `repeat_days` (7-365). الفني يجب أن يحمل وثيقة `pesticide_license` سارية يوم الزيارة.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST / PATCH | `/pest/products` ، `/pest/products/:id` | سجل المبيدات: `name`، `active_ingredient`، `registration_no`، `unit`، `reentry_hours` (0-72)؛ التعديل بـ `version`، و`active: false` يخفيه من قائمة الفني |
+| GET | `/pest/jobs?date=` | أوامر اليوم وكل أمر سابق مفتوح، مع `state` (open، assigned، en_route، on_site، treated، done، failed، canceled) |
+| POST | `/pest/jobs` | `legal_entity_id`، `customer_id`، `premises`، `service`، `pests`، `area`، `scheduled_at`، واختياريًا `address`، `lat`/`lng`، `contact_phone`، `duration_min` (افتراضيًا 90)، `warranty_days`، `repeat_days`، `notes` |
+| GET | `/pest/jobs/:id` | الأمر مع `applications` (المبيد ورقم تسجيله والكمية والمكان) و`callbacks` و`reentry_at` و`next_ref` |
+| POST | `/pest/jobs/:id/assign` | `{worker_id, asset_id?, start_at?}`؛ 409 `license_required` (بلا ترخيص ساري يوم الزيارة) أو `technician_booked` أو `vehicle_booked`؛ المهمة تحمل قائمة المبيدات الفعالة |
+| POST | `/pest/jobs/:id/callback` | `{reason, scheduled_at}` لأمر مغلق: أمر تابع، و`in_warranty` إن كان خلال مدة الضمان من العلاج |
+| POST | `/pest/jobs/:id/cancel` | `{reason}` قبل بدء الزيارة |
+| GET | `/pest/exceptions` | `unassigned` (بلا فني وموعدها خلال 24 ساعة)، `overdue`، `callbacks` المفتوحة، `high_infestation` (آخر 30 يومًا)، `license_missing` (فني بلا ترخيص يوم زيارته في الأيام السبعة القادمة)، `unregistered_products` |
+| GET | `/pest/report?from=&to=` | حسب يوم الزيارة: الأوامر والمغلقة وإعادات الزيارة (وضمنها الضمان) ونسبتها والإصابات الشديدة، وحسب الآفة ونوع المنشأة (`key`)، وكميات كل مبيد وعدد أوامره |
+
+من التطبيق: مهمة `pest@1` تحمل `kind: pest_job` و`job_ref`، `premises`، `pests`، `service`، `notes`، `customer_name`، `contact_phone`، `address`، `in_warranty`، `previous`، و`products` ([{id, name, unit, reentry_hours}]). المحطات أثناء `in_progress`: `pc_arrived` ثم `pc_treated` مع `applications` ([{product_id, qty, location}]، حتى 20)، و`infestation` (none، low، medium، high)، و`received_by`، و`note`. الرفض: `stage_out_of_order`، `infestation_required`، `receiver_required`، `products_required` (إلا للكشف فقط)، `products_invalid`، `unknown_product`. الإنهاء يحتاج `pc_treated` (`proof_required`)، وإنهاء أمر بعقد دوري يُنشئ الأمر التالي بعد `repeat_days`. وقت السماح بالدخول = وقت العلاج + أطول مدة منع بين المبيدات المستخدمة. أسباب التعذّر: customer_absent، no_access، customer_canceled، premises_not_ready، other.
+
 ## قطاع نقل الأثاث moving (القطاع 5)
 
 طلب النقل (`MV-n`) ينقل بيتًا أو مكتبًا من عنوان إلى عنوان. المراحل: `new` بانتظار المعاينة والسعر ← `quoted` بانتظار رد العميل ← `accepted` بانتظار حجز الطاقم ← `booked` ← `moving` (السائق بدأ) ← `delivered` (فُرّغ) ← `closed`، أو `canceled`. ساعات الحجز وعدد العمال تُقترح من الحجم (غرفة ساعتان وعامل، شقة غرفتين 5 ساعات و3 عمال، فيلا 10 ساعات و6 عمال) [تخمين]. العربون يُسجَّل فقط: المنصة لا تحتفظ بأموال العملاء. يوم النقل: الشاحنة والسائق على المهمة الرئيسية `MV-n-1`، وكل عامل على مهمة طاقم `MV-n-1-H1`… تحجزه حصريًا لنفس النافذة. الأسعار من المكتب.

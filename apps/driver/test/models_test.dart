@@ -436,6 +436,17 @@ void main() {
     expect(failReasonsFor(t), securityFailReasons);
   });
 
+  test('pest visit: arrive, then the treatment, then done', () {
+    final t = task('in_progress', pack: 'pest@1', attrs: {'kind': 'pest_job', 'address': 'شارع البلاجات، السالمية'});
+    expect((t.isPest, t.address), (true, 'شارع البلاجات، السالمية'));
+    expect(nextActions(t), [TaskAction.pcArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'pc_arrived')), [TaskAction.pcTreated, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'pc_treated')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.pcTreated), 'تسجيل العلاج');
+    expect(failReasonsFor(t), pestFailReasons);
+    expect(rejectReasons['products_required'], isNotNull);
+  });
+
   test('crane day: lift plans, critical blocked until approved, the day stays open while a lift is planned', () {
     final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'equipment@1', 'attributes': {}, 'version': 1, 'lifts': [
       {'id': 'a', 'ref': 'LP-1', 'time': '09:00:00', 'description': 'جسر', 'load_t': 10, 'radius_m': 8, 'rated_t': 20, 'utilization': 50, 'critical': false, 'approved': false, 'status': 'done', 'wind_limit_ms': 9},

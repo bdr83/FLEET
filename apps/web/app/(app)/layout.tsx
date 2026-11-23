@@ -30,6 +30,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/waste', label: 'جمع النفايات', perm: 'tasks:read', pack: 'waste' },
   { href: '/utilities', label: 'أعمال المرافق', perm: 'tasks:read', pack: 'utilities' },
   { href: '/security', label: 'الحراسة والدوريات', perm: 'tasks:read', pack: 'security' },
+  { href: '/pest', label: 'مكافحة الحشرات', perm: 'tasks:read', pack: 'pest' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
   { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/moving', label: 'نقل الأثاث', perm: 'tasks:read', pack: 'moving' },

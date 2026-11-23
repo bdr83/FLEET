@@ -172,6 +172,18 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isPest) ...[
+          Card(key: const Key('pest-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${t.attributes['job_ref'] ?? ''} · ${pestPremisesLabels[t.attributes['premises']] ?? ''} · ${pestServiceLabels[t.attributes['service']] ?? ''}', style: text.labelMedium),
+            Text('${t.attributes['customer_name'] ?? ''}', style: text.titleLarge),
+            Text('الآفات: ${[for (final p in (t.attributes['pests'] as List? ?? const [])) pestLabels[p] ?? p].join('، ')}'),
+            if (t.attributes['in_warranty'] == true) Text('إعادة زيارة ضمن الضمان (بلا رسوم)', style: text.titleSmall?.copyWith(color: Theme.of(context).colorScheme.error)),
+            if (t.attributes['previous'] != null) Text('الزيارة السابقة: ${t.attributes['previous']}'),
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+            if (t.attributes['contact_phone'] != null) Ltr('${t.attributes['contact_phone']}'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isOilgas) ...[
           Card(key: const Key('oilgas-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('${t.attributes['journey_ref'] ?? ''} · ${t.attributes['site_code'] ?? ''}', style: text.labelMedium),
@@ -487,6 +499,18 @@ class _ActionsState extends State<_Actions> {
         if (r == null) return;
         final err = await s.utilitiesStage(task.id, 'ut_restored', result: r.result, note: r.note);
         if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.pcArrived:
+        final err = await s.pestStage(task.id, 'pc_arrived');
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.pcTreated:
+        final r = await _pestForm(context);
+        if (r == null) return;
+        final err = await s.pestStage(task.id, 'pc_treated', applications: r.apps, infestation: r.infestation, receivedBy: r.receivedBy, note: r.note);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        final hours = [for (final a in r.apps) for (final p in (task.attributes['products'] as List? ?? const [])) if (p is Map && p['id'] == a['product_id']) (p['reentry_hours'] as num?)?.toInt() ?? 0];
+        final h = hours.isEmpty ? 0 : hours.reduce((x, y) => x > y ? x : y);
+        toast(context, h > 0 ? 'سُجّل العلاج. أبلغ العميل: لا دخول قبل $h ساعات' : 'سُجّل العلاج');
       case TaskAction.ogInspect:
         final checks = await _oilgasForm(context);
         if (checks == null) return;
@@ -742,6 +766,42 @@ class _ActionsState extends State<_Actions> {
           FilledButton(key: const Key('ut-result-save'), onPressed: result == null ? null : () => Navigator.pop(ctx, (result: result!, note: n.text.trim().isEmpty ? null : n.text.trim())),
               child: const Text('تأكيد')),
         ]),
+      )),
+    );
+  }
+
+  /// Pest treatment: the quantity of each product used (empty = not used), the place, the infestation level, the receiver and a note.
+  Future<({List<Map<String, dynamic>> apps, String infestation, String receivedBy, String? note})?> _pestForm(BuildContext context) {
+    final products = [for (final p in (task.attributes['products'] as List? ?? const [])) if (p is Map) Map<String, dynamic>.from(p)];
+    final qty = {for (final p in products) p['id'] as String: TextEditingController()};
+    final where = TextEditingController(), by = TextEditingController(), note = TextEditingController();
+    String? level;
+    double? q(String id) {
+      final x = double.tryParse(qty[id]!.text.trim().replaceAll('٫', '.').replaceAll(',', '.'));
+      return x != null && x > 0 && x <= 100000 ? x : null;
+    }
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('تسجيل العلاج', style: Theme.of(ctx).textTheme.titleLarge),
+          const Text('اكتب كمية كل مبيد استخدمته، واترك الباقي فارغًا.'),
+          for (final p in products)
+            TextField(key: Key('qty-${p['id']}'), controller: qty[p['id']], keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => set(() {}),
+                decoration: InputDecoration(labelText: '${p['name']} (${pestUnitLabels[p['unit']] ?? p['unit']})')),
+          TextField(key: const Key('pc-where'), controller: where, maxLength: 120, decoration: const InputDecoration(labelText: 'أماكن العلاج (المطبخ، المخزن...)')),
+          const SizedBox(height: 8),
+          const Text('مستوى الإصابة'),
+          Wrap(spacing: 6, children: [for (final e in infestationLabels.entries) ChoiceChip(label: Text(e.value), selected: level == e.key, onSelected: (_) => set(() => level = e.key))]),
+          TextField(key: const Key('pc-by'), controller: by, maxLength: 120, onChanged: (_) => set(() {}), decoration: const InputDecoration(labelText: 'اسم المستلم')),
+          TextField(key: const Key('pc-note'), controller: note, maxLength: 500, decoration: const InputDecoration(labelText: 'ملاحظة للعميل والمكتب')),
+          FilledButton(key: const Key('pc-save'), onPressed: level == null || by.text.trim().isEmpty ? null : () => Navigator.pop(ctx, (
+                apps: [for (final p in products) if (q(p['id'] as String) != null) {'product_id': p['id'], 'qty': q(p['id'] as String), if (where.text.trim().isNotEmpty) 'location': where.text.trim()}],
+                infestation: level!, receivedBy: by.text.trim(), note: note.text.trim().isEmpty ? null : note.text.trim())),
+              child: const Text('تأكيد العلاج')),
+        ])),
       )),
     );
   }

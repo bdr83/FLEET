@@ -73,6 +73,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'waste', sector: 23, label: 'جمع النفايات والتنظيف', hint: 'خطوط جمع ثابتة لكابسات النفايات، نقاط جمع بحاويات العملاء، جولات يومية، تسجيل كل نقطة جُمعت أو لم تُجمع بسبب، تذاكر ميزان المردم والأطنان' },
   { code: 'utilities', sector: 24, label: 'المرافق: الكهرباء والماء والاتصالات', hint: 'أوامر عمل ميدانية بأولوية وموعد استجابة، فرق بسيارة وقائد، تصاريح الحفر، العزل وقائمة السلامة، الإصلاح وإعادة الطريق، زمن الاستجابة والانقطاع' },
   { code: 'security', sector: 25, label: 'الحراسة والدوريات', hint: 'مواقع العملاء ونقاط التفتيش برموزها، جولات الحراس اليومية، المسح أو التخطي بسبب، بلاغات الحوادث بالخطورة، التغطية والاستثناءات' },
+  { code: 'pest', sector: 26, label: 'مكافحة الحشرات والقوارض', hint: 'أوامر المكافحة للمنازل والمطاعم والمنشآت، سجل المبيدات ورقم تسجيلها، ترخيص الفني، الكميات المستخدمة ووقت منع الدخول، الضمان وإعادة الزيارة، العقود الدورية' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -115,7 +116,7 @@ export const DOC_TYPE: Record<string, string> = {
   driving_license: 'رخصة قيادة', vehicle_registration: 'دفتر المركبة', insurance: 'تأمين', civil_id: 'البطاقة المدنية',
   residency: 'إقامة', work_permit: 'إذن عمل', inspection: 'فحص فني',
   h2s: 'دورة H2S', defensive_driving: 'القيادة الوقائية', site_pass: 'تصريح دخول الموقع', hazmat: 'نقل المواد الخطرة', medical: 'لياقة طبية', site_sticker: 'ملصق دخول المركبة',
-  tpi_certificate: 'شهادة فحص الرافعة (TPI)', crane_operator: 'رخصة مشغّل رافعة', rigger_cert: 'شهادة موجّه الرفع', other: 'أخرى',
+  tpi_certificate: 'شهادة فحص الرافعة (TPI)', crane_operator: 'رخصة مشغّل رافعة', rigger_cert: 'شهادة موجّه الرفع', pesticide_license: 'ترخيص مزاولة مكافحة الآفات', other: 'أخرى',
 };
 
 export const CUSTOMER_STATUS: Record<string, { label: string; tone: string }> = {
@@ -357,6 +358,18 @@ export const SC_CATEGORY: Record<string, string> = { intrusion: 'تسلل', thef
 export const SC_SEVERITY: Record<string, { label: string; tone: string }> = { high: tone('عالية', 'danger'), medium: tone('متوسطة', 'warning'), low: tone('منخفضة', 'info') };
 export const SC_FAIL: Record<string, string> = { site_closed: 'الموقع مغلق', guard_unwell: 'الحارس متوعك', emergency_elsewhere: 'طارئ في موقع آخر' };
 Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(SC_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+/** Pest control (pest pack) labels. */
+export const PC_PREMISES: Record<string, string> = { home: 'منزل', restaurant: 'مطعم', office: 'مكتب', warehouse: 'مستودع', hospital: 'مستشفى أو عيادة', school: 'مدرسة', other: 'أخرى' };
+export const PC_PEST: Record<string, string> = { cockroaches: 'صراصير', ants: 'نمل', rodents: 'قوارض', termites: 'نمل أبيض', bedbugs: 'بق الفراش', mosquitoes: 'بعوض', flies: 'ذباب', birds: 'طيور', scorpions_snakes: 'عقارب وثعابين', other: 'أخرى' };
+export const PC_SERVICE: Record<string, string> = { spray: 'رش', gel: 'جل', bait: 'طعوم', fumigation: 'تبخير', inspection: 'كشف فقط' };
+export const PC_UNIT: Record<string, string> = { ml: 'مل', l: 'لتر', g: 'غرام', kg: 'كغ', unit: 'قطعة' };
+export const PC_INFESTATION: Record<string, { label: string; tone: string }> = { none: tone('لا إصابة', 'success'), low: tone('خفيفة', 'info'), medium: tone('متوسطة', 'warning'), high: tone('شديدة', 'danger') };
+export const PC_STATE: Record<string, { label: string; tone: string }> = {
+  open: tone('بلا فني', 'warning'), assigned: tone('مسند', 'info'), en_route: tone('في الطريق', 'primary'), on_site: tone('في الموقع', 'primary'), treated: tone('عولج', 'success'),
+  done: tone('مغلق', 'success'), failed: tone('تعذّر', 'danger'), canceled: tone('ملغى'),
+};
+export const PC_FAIL: Record<string, string> = { customer_absent: 'العميل غير موجود', customer_canceled: 'العميل ألغى', premises_not_ready: 'المكان غير مجهّز' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(PC_FAIL).filter(([k]) => !(k in FAIL_REASON))));
 /** Cranes and lifting (cranes pack) labels. */
 export const CR_STATUS: Record<string, { label: string; tone: string }> = {
   planned: tone('مخططة', 'info'), done: tone('نُفذت', 'success'), aborted: tone('أُوقفت', 'danger'), canceled: tone('ملغاة'),
