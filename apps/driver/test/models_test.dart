@@ -406,6 +406,21 @@ void main() {
     expect(failReasonsFor(t), oilgasFailReasons);
   });
 
+  test('utilities work order: arrive, isolate, restore; a dig also reinstates the road', () {
+    final t = task('in_progress', pack: 'utilities@1', attrs: {'kind': 'work_order', 'address': 'ق 1 ش 5، الجابرية'});
+    expect((t.isUtilities, t.address), (true, 'ق 1 ش 5، الجابرية'));
+    expect(nextActions(t), [TaskAction.utArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'ut_arrived')), [TaskAction.utIsolate, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'ut_isolated')), [TaskAction.utRestored, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'ut_restored')), [TaskAction.complete]);
+    final dig = task('in_progress', pack: 'utilities@1', attrs: {'needs_permit': true}, stage: 'ut_restored');
+    expect(nextActions(dig), [TaskAction.utReinstated]);
+    expect(nextActions(dig.copyWith(stage: 'ut_reinstated')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.utIsolate), 'العزل وقائمة السلامة');
+    expect(failReasonsFor(t), utilitiesFailReasons);
+    expect(rejectReasons['permit_expired'], isNotNull);
+  });
+
   test('crane day: lift plans, critical blocked until approved, the day stays open while a lift is planned', () {
     final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'equipment@1', 'attributes': {}, 'version': 1, 'lifts': [
       {'id': 'a', 'ref': 'LP-1', 'time': '09:00:00', 'description': 'جسر', 'load_t': 10, 'radius_m': 8, 'rated_t': 20, 'utilization': 50, 'critical': false, 'approved': false, 'status': 'done', 'wind_limit_ms': 9},

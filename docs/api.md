@@ -607,6 +607,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 من التطبيق: مهمة الجولة تحمل `waste` (النقاط بحاوياتها وتسجيلها، وعدد التذاكر والوزن). عمليتا مزامنة: `{type: 'visit', point_id, event, bins, reason}` و`{type: 'dump', ticket_no, net_kg, facility}`، أثناء الجولة فقط. الرفض: `bins_required`، `bins_invalid` (أكثر من ضعف حاويات النقطة)، `miss_reason_required`، `unknown_point`، `ticket_required`، `weight_required`، `ticket_already_recorded`. لا تكتمل الجولة قبل تسجيل كل النقاط (`points_open`) ولا بلا تذكرة ميزان إن جُمعت نقطة (`dump_required`).
 
+## قطاع أعمال المرافق utilities (القطاع 24)
+
+أوامر عمل ميدانية لمقاولي شبكات الكهرباء والماء والاتصالات. أمر العمل (`UJ-n`) له شبكة (electricity، water، telecom)، ونوع عمل (outage، repair، connection، meter، inspection، excavation)، وأولوية تحدد آخر موعد للوصول من وقت البلاغ: طارئ ساعتان، عاجل 24 ساعة، مجدول 7 أيام [تخمين: يُطابق مع عقد كل عميل]. وفيه الموقع ورقم الأصل (مغذٍّ، محول، خط) وعدد المشتركين المتأثرين. أعمال الحفر (`needs_permit`، افتراضيًا لنوع excavation) تحتاج تصريح حفر ساريًا قبل العزل، وإعادة الطريق قبل الإغلاق. الفرقة (سيارة وقائد) تُحجز حصريًا للأمر. زمن الاستجابة من البلاغ إلى الوصول، وزمن الإصلاح من البلاغ إلى الإصلاح.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET | `/utilities/jobs?date=` | أوامر اليوم وكل أمر مفتوح، الطارئ أولًا، مع `state` و`response_min` و`restore_min` و`breached` |
+| POST | `/utilities/jobs` | `legal_entity_id`، `network`، `job_type`، `priority`، `reported_at` (ليس في المستقبل)، `area`، `description`، واختياريًا `customer_id`، `address`، `lat`/`lng`، `asset_ref`، `affected`، `duration_min` (30-1440، افتراضيًا 240)، `needs_permit`، `permit_no` و`permit_expires` |
+| GET | `/utilities/jobs/:id` | الأمر مع الفرقة وأوقات المراحل وقائمة السلامة والنتيجة |
+| PUT | `/utilities/jobs/:id/permit` | `{permit_no, permit_expires}`: يسجّل التصريح أو يجدده (ويحدّث بطاقة المهمة عند الفرقة) |
+| POST | `/utilities/jobs/:id/assign` | `{worker_id, asset_id, start_at?}`: يحجز الفرقة من `start_at` (افتراضيًا الآن) لمدة الأمر؛ 409 `worker_booked` أو `vehicle_booked`؛ إعادة الإسناد تلغي المهمة السابقة |
+| POST | `/utilities/jobs/:id/cancel` | `{reason}` قبل بدء العمل |
+| GET | `/utilities/exceptions` | `response_breach` (تجاوزت موعد الوصول ولم تصل الفرقة)، `unassigned` (بلا فرقة وموعدها خلال ساعتين)، `permits` (حفر بلا تصريح أو ينتهي خلال يومين [تخمين])، `not_reinstated` (لم يُعد الطريق بعد 3 أيام من الإصلاح [تخمين])، `follow_up` (إصلاحات مؤقتة) |
+| GET | `/utilities/report?from=&to=` | حسب يوم البلاغ: الأوامر والمغلقة وتجاوز الاستجابة ومتوسط الاستجابة والإصلاح ودقائق الانقطاع × المشتركين والإصلاحات المؤقتة، إجمالًا ولكل عميل ولكل شبكة (`key`) |
+
+من التطبيق: مهمة `utilities@1` تحمل `kind: work_order` و`job_ref`، `network`، `job_type`، `priority`، `due_at`، `asset_ref`، `description`، `affected`، `needs_permit`، `permit_no`، `permit_expires`، `address`. المحطات أثناء `in_progress` وبالترتيب: `ut_arrived`، ثم `ut_isolated` مع `checks` (isolation، ppe، barriers، و`permit_on_site` للحفر؛ كلها `true`)، ثم `ut_restored` مع `result` (fixed، follow_up، not_fixed) و`note`، ثم `ut_reinstated` للحفر فقط. الرفض: `stage_out_of_order`، `permit_required`، `permit_expired`، `checks_required`، `checks_failed`، `result_required`، `not_required` (إعادة طريق لأمر بلا حفر). الإنهاء يحتاج `ut_restored` (`proof_required`) وللحفر `ut_reinstated` (`reinstatement_required`). أسباب التعذّر: vehicle_breakdown، no_access، permit_refused، materials_missing، site_unsafe، other. تُحرَّر الفرقة عند الإصلاح (أو عند إعادة الطريق للحفر).
+
 ## قطاع نقل الأثاث moving (القطاع 5)
 
 طلب النقل (`MV-n`) ينقل بيتًا أو مكتبًا من عنوان إلى عنوان. المراحل: `new` بانتظار المعاينة والسعر ← `quoted` بانتظار رد العميل ← `accepted` بانتظار حجز الطاقم ← `booked` ← `moving` (السائق بدأ) ← `delivered` (فُرّغ) ← `closed`، أو `canceled`. ساعات الحجز وعدد العمال تُقترح من الحجم (غرفة ساعتان وعامل، شقة غرفتين 5 ساعات و3 عمال، فيلا 10 ساعات و6 عمال) [تخمين]. العربون يُسجَّل فقط: المنصة لا تحتفظ بأموال العملاء. يوم النقل: الشاحنة والسائق على المهمة الرئيسية `MV-n-1`، وكل عامل على مهمة طاقم `MV-n-1-H1`… تحجزه حصريًا لنفس النافذة. الأسعار من المكتب.
