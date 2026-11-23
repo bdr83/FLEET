@@ -275,6 +275,23 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Container leg: picked up with the number read on the box (checked by the server) and the seal; checked online at once.
+  Future<String?> containerPicked(String taskId, {required String containerNo, String? sealNo}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'ctr_picked', 'container_no': containerNo, 'seal_no': ?sealNo}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(stage: 'ctr_picked'));
+    return null;
+  }
+
+  /// Container leg: dropped with the receiver's name or the gate receipt; then ends the leg.
+  Future<String?> containerDropped(String taskId, {String? receivedBy, String? gateRef}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'ctr_dropped', 'received_by': ?receivedBy, 'gate_ref': ?gateRef}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'ctr_dropped'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Move: unloaded at the new home with the receiver's name (and any damage noted); checked online at once, then ends the move.
   Future<String?> moveDone(String taskId, {required String receivedBy, String? note}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'unloaded', 'received_by': receivedBy, 'note': ?note}, wait: true);

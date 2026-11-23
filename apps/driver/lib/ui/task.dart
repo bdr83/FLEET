@@ -142,6 +142,23 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isContainer) ...[
+          Card(key: const Key('container-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('حاوية · ${t.attributes['job_ref'] ?? ''} · ${containerLegLabels[t.attributes['leg']] ?? ''}', style: text.labelMedium),
+            if (t.containerNo != null) Ltr(t.containerNo!, style: text.headlineSmall),
+            Text('${t.attributes['iso_size'] ?? ''} قدم · ${containerTypeLabels[t.attributes['ctype']] ?? ''}${t.attributes['line'] != null ? ' · ${t.attributes['line']}' : ''}', style: text.titleMedium),
+            if (t.attributes['doc_no'] != null) Row(children: [const Text('البوليصة: '), Ltr('${t.attributes['doc_no']}')]),
+            if (t.attributes['seal_no'] != null) Row(children: [const Text('الختم: '), Ltr('${t.attributes['seal_no']}')]),
+            if (t.attributes['customer_name'] != null) Text('العميل: ${t.attributes['customer_name']}'),
+            if (t.attributes['contact_phone'] != null) Row(children: [const Text('الهاتف: '), Ltr('${t.attributes['contact_phone']}')]),
+            const SizedBox(height: 6),
+            Text('السحب من', style: text.labelMedium),
+            Text(t.pickupLine.isEmpty ? '—' : t.pickupLine),
+            const SizedBox(height: 4),
+            Text(t.needsGateRef ? 'اكتب رقم الحاوية عند سحبها، ورقم إيصال البوابة عند التسليم.' : 'اكتب رقم الحاوية عند سحبها، واسم المستلم عند التسليم.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isMoving || t.isMoveCrew) ...[
           Card(key: const Key('move-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('نقل أثاث · ${t.attributes['move_ref'] ?? ''}${t.isMoveCrew ? ' · ضمن الطاقم' : ''}', style: text.labelMedium),
@@ -180,7 +197,7 @@ class TaskScreen extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight || t.isMoving || t.isMoveCrew ? 'التفريغ في' : 'العنوان', style: text.labelMedium),
+          Text(t.isConcrete || t.isStaffing ? 'الموقع' : t.isInternal ? 'الوجهة' : t.isFreight || t.isMoving || t.isMoveCrew ? 'التفريغ في' : t.isContainer ? 'التسليم في' : 'العنوان', style: text.labelMedium),
           Text(t.address.isEmpty ? '—' : t.address, style: text.titleMedium),
           if (t.notes != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(t.notes!)),
           if (t.windowFrom != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('الموعد: ${kwTime(t.windowFrom, date: true)} إلى ${kwTime(t.windowTo)}')),
@@ -344,6 +361,19 @@ class _ActionsState extends State<_Actions> {
         final r = await _cargoForm(context, 'التحميل', 'تأكيد التحميل', receiver: false);
         if (r == null) return;
         await s.milestone(task.id, 'loaded', extra: {'weight_kg': ?r.weightKg, 'seal_no': ?r.seal});
+      case TaskAction.ctrPicked:
+        final r = await _ctrForm(context, pick: true);
+        if (r == null) return;
+        final err = await s.containerPicked(task.id, containerNo: r.a, sealNo: r.b);
+        if (err != null && context.mounted) toast(context, err, error: true);
+      case TaskAction.ctrDropped:
+        final r = await _ctrForm(context, pick: false);
+        if (r == null) return;
+        final err = task.needsGateRef ? await s.containerDropped(task.id, gateRef: r.a) : await s.containerDropped(task.id, receivedBy: r.a);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        toast(context, s.offline ? 'سُجّل التسليم وسيُرسل عند عودة الاتصال' : 'سُلّمت الحاوية وانتهت الرحلة');
+        Navigator.of(context).pop();
       case TaskAction.unloaded when task.isMoving:
         final r = await _moveForm(context);
         if (r == null) return;
@@ -460,6 +490,36 @@ class _ActionsState extends State<_Actions> {
               receiver: receiver ? other.text.trim() : null,
             )),
             child: Text(confirm),
+          ),
+        ]),
+      )),
+    );
+  }
+
+  /// Container pickup (the number read on the box, checked here and on the server; the seal) or drop (receiver or gate receipt).
+  Future<({String a, String? b})?> _ctrForm(BuildContext context, {required bool pick}) {
+    final one = TextEditingController(), two = TextEditingController();
+    bool ok() => pick ? normContainer(one.text) != null : one.text.trim().isNotEmpty;
+    return showModalBottomSheet<({String a, String? b})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(pick ? 'سحب الحاوية' : 'تسليم الحاوية', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          if (pick) ...[
+            TextField(key: const Key('container-no'), controller: one, autofocus: true, textDirection: TextDirection.ltr, textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(labelText: 'رقم الحاوية كما هو عليها', errorText: one.text.trim().length >= 11 && normContainer(one.text) == null ? 'رقم غير صحيح' : null), onChanged: (_) => set(() {})),
+            TextField(key: const Key('seal-no'), controller: two, textDirection: TextDirection.ltr, decoration: const InputDecoration(labelText: 'رقم الختم (إن وُجد)')),
+          ] else
+            TextField(key: const Key('drop-ref'), controller: one, autofocus: true, textDirection: task.needsGateRef ? TextDirection.ltr : null,
+                decoration: InputDecoration(labelText: task.needsGateRef ? 'رقم إيصال البوابة (EIR)' : 'اسم المستلم'), onChanged: (_) => set(() {})),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('ctr-save'),
+            onPressed: ok() ? () => Navigator.pop(ctx, (a: pick ? normContainer(one.text)! : one.text.trim(), b: two.text.trim().isEmpty ? null : two.text.trim())) : null,
+            child: Text(pick ? 'تأكيد السحب' : 'تأكيد التسليم'),
           ),
         ]),
       )),

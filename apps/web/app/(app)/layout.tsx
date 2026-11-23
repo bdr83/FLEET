@@ -25,6 +25,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
   { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/moving', label: 'نقل الأثاث', perm: 'tasks:read', pack: 'moving' },
+  { href: '/containers', label: 'الحاويات', perm: 'tasks:read', pack: 'containers' },
   { href: '/requests', label: 'طلبات المركبات', perm: 'vehicle_requests:own', pack: 'internal' },
   { href: '/map', label: 'الخريطة الحية', perm: 'fleet:read' },
   { sec: 'الأسطول' },
