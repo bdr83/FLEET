@@ -272,6 +272,10 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isSecurity) ...[
+          _PatrolCard(t: t),
+          const SizedBox(height: 12),
+        ],
         if (t.isWaste) ...[
           _WasteCard(t: t),
           const SizedBox(height: 12),
@@ -441,7 +445,7 @@ class _ActionsState extends State<_Actions> {
       case TaskAction.accept: await s.setStatus(task.id, 'accepted');
       case TaskAction.start: await s.setStatus(task.id, 'in_progress');
       case TaskAction.complete:
-        final block = task.isSchool ? task.schoolFinishBlock : task.isWaste ? task.wasteFinishBlock : null;
+        final block = task.isSchool ? task.schoolFinishBlock : task.isWaste ? task.wasteFinishBlock : task.isSecurity ? task.securityFinishBlock : null;
         if (block != null) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(rejectReasons[block] ?? block)));
           return;
@@ -1305,6 +1309,110 @@ class _WasteCard extends StatelessWidget {
       if (open) ...[
         const Divider(),
         OutlinedButton.icon(key: const Key('dump'), onPressed: () => _dump(context), icon: const Icon(Icons.scale), label: const Text('تفريغ في المردم (تذكرة الميزان)')),
+      ],
+    ])));
+  }
+}
+
+class _PatrolCard extends StatelessWidget {
+  const _PatrolCard({required this.t});
+  final DriverTask t;
+
+  Future<void> _scan(BuildContext context, Checkpoint k) async {
+    final s = AppScope.of(context);
+    final ctl = TextEditingController();
+    final tag = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: Text('مسح: ${k.name}'),
+      content: TextField(key: const Key('tag'), controller: ctl, autofocus: true, textDirection: TextDirection.ltr, textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(labelText: 'رمز النقطة', helperText: 'الرمز المثبّت في المكان')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('رجوع')),
+        FilledButton(key: const Key('tag-ok'), onPressed: () => Navigator.pop(ctx, ctl.text.trim()), child: const Text('تأكيد')),
+      ],
+    ));
+    if (tag == null || !context.mounted) return;
+    if (tag.isEmpty) return toast(context, rejectReasons['tag_required']!, error: true);
+    final err = await s.markCheckpoint(t.id, k.id, 'scanned', tag: tag);
+    if (!context.mounted) return;
+    if (err != null) return toast(context, err, error: true);
+    toast(context, 'مُسحت ${k.name}');
+  }
+
+  Future<void> _skip(BuildContext context, Checkpoint k) async {
+    final s = AppScope.of(context);
+    final reason = await showDialog<String>(context: context, builder: (ctx) => SimpleDialog(
+      title: Text('لم تُفحص: ${k.name}'),
+      children: [for (final e in securitySkipReasons.entries) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, e.key), child: Text(e.value))],
+    ));
+    if (reason == null || !context.mounted) return;
+    final err = await s.markCheckpoint(t.id, k.id, 'skipped', reason: reason);
+    if (err != null && context.mounted) toast(context, err, error: true);
+  }
+
+  Future<void> _incident(BuildContext context) async {
+    final s = AppScope.of(context);
+    String category = 'suspicious', severity = 'medium';
+    final d = TextEditingController();
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('بلاغ حادث', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [for (final e in incidentCategories.entries)
+            ChoiceChip(label: Text(e.value), selected: category == e.key, onSelected: (_) => set(() => category = e.key))]),
+          const SizedBox(height: 8),
+          SegmentedButton<String>(segments: [for (final e in incidentSeverities.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+              selected: {severity}, onSelectionChanged: (x) => set(() => severity = x.first)),
+          TextField(key: const Key('incident-desc'), controller: d, maxLength: 1000, maxLines: 3, decoration: const InputDecoration(labelText: 'وصف الحادث'), onChanged: (_) => set(() {})),
+          FilledButton(key: const Key('incident-ok'), onPressed: d.text.trim().isEmpty ? null : () => Navigator.pop(ctx, true), child: const Text('إرسال البلاغ')),
+        ]),
+      )),
+    );
+    if (ok != true || !context.mounted) return;
+    final err = await s.reportIncident(t.id, category: category, severity: severity, description: d.text.trim());
+    if (!context.mounted) return;
+    if (err != null) return toast(context, err, error: true);
+    toast(context, s.offline ? 'سُجّل البلاغ وسيُرسل عند عودة الاتصال' : 'وصل البلاغ للمكتب');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final cps = t.checkpointList;
+    final open = t.status == 'in_progress';
+    int n(String? e) => cps.where((k) => k.event == e).length;
+    return Card(key: const Key('patrol-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Text('جولة حراسة · ${t.attributes['site_code'] ?? ''} · ${t.attributes['slot'] ?? ''}', style: text.labelMedium),
+      Text('${t.attributes['site_name'] ?? ''}', style: text.titleLarge),
+      if (t.attributes['instructions'] != null) Text('${t.attributes['instructions']}', style: TextStyle(color: scheme.primary)),
+      const SizedBox(height: 6),
+      Text('مُسحت ${n('scanned')} · لم تُفحص ${n('skipped')} · باقية ${n(null)}${t.incidentCount > 0 ? ' · حوادث ${t.incidentCount}' : ''}',
+          key: const Key('patrol-count'), style: const TextStyle(fontWeight: FontWeight.bold)),
+      if (!open && ['assigned', 'accepted'].contains(t.status)) const Padding(padding: EdgeInsets.only(top: 4), child: Text('ابدأ الجولة لتسجيل النقاط')),
+      for (final k in cps) ...[
+        const Divider(),
+        Row(children: [
+          Ltr('${k.seq}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(k.name, style: text.titleSmall)),
+          Icon(switch (k.event) { 'scanned' => Icons.check_circle, 'skipped' => Icons.cancel_outlined, _ => Icons.radio_button_unchecked },
+              size: 20, color: switch (k.event) { 'scanned' => Colors.green, 'skipped' => scheme.error, _ => null }),
+        ]),
+        if (k.note != null) Text(k.note!, style: text.bodySmall),
+        if (k.event == 'scanned') const Text('مُسحت'),
+        if (k.event == 'skipped') Text('لم تُفحص: ${securitySkipReasons[k.reason] ?? k.reason ?? ''}', style: TextStyle(color: scheme.error)),
+        if (open) Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          Semantics(button: true, label: 'مسح ${k.name}', excludeSemantics: true, child: TextButton(onPressed: () => _scan(context, k), child: const Text('مسح'))),
+          Semantics(button: true, label: 'لم تُفحص ${k.name}', excludeSemantics: true, child: TextButton(onPressed: () => _skip(context, k), child: const Text('لم تُفحص'))),
+        ]),
+      ],
+      if (open) ...[
+        const Divider(),
+        OutlinedButton.icon(key: const Key('incident'), onPressed: () => _incident(context), icon: Icon(Icons.report_outlined, color: scheme.error), label: const Text('بلاغ حادث')),
       ],
     ])));
   }

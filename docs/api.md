@@ -624,6 +624,26 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 من التطبيق: مهمة `utilities@1` تحمل `kind: work_order` و`job_ref`، `network`، `job_type`، `priority`، `due_at`، `asset_ref`، `description`، `affected`، `needs_permit`، `permit_no`، `permit_expires`، `address`. المحطات أثناء `in_progress` وبالترتيب: `ut_arrived`، ثم `ut_isolated` مع `checks` (isolation، ppe، barriers، و`permit_on_site` للحفر؛ كلها `true`)، ثم `ut_restored` مع `result` (fixed، follow_up، not_fixed) و`note`، ثم `ut_reinstated` للحفر فقط. الرفض: `stage_out_of_order`، `permit_required`، `permit_expired`، `checks_required`، `checks_failed`، `result_required`، `not_required` (إعادة طريق لأمر بلا حفر). الإنهاء يحتاج `ut_restored` (`proof_required`) وللحفر `ut_reinstated` (`reinstatement_required`). أسباب التعذّر: vehicle_breakdown، no_access، permit_refused، materials_missing، site_unsafe، other. تُحرَّر الفرقة عند الإصلاح (أو عند إعادة الطريق للحفر).
 
+## قطاع الحراسة والدوريات security (القطاع 25)
+
+مواقع عملاء تُحرس بجولات تفتيش. الموقع (`code`) لعميل، وله نقاط تفتيش مرتبة لكل منها رمز `tag` مثبت في المكان (ملصق أو QR) يُدخله الحارس دليلًا على المرور، ومواعيد جولات `patrol_times` (HH:MM)، ومدة الجولة، وأيام التشغيل، وحارس افتراضي (`guard` أو `supervisor` أو `driver`)، وسيارة دورية اختيارية. كل موعد في يوم تشغيل تُولَّد له جولة `PT-<الموقع>-<التاريخ>-<HHMM>` تحجز الحارس (والسيارة) حصريًا. الرمز لا يُرسل للتطبيق.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST / PATCH | `/security/sites` ، `/security/sites/:id` | المواقع: `code`، `name`، `customer_id`، `area`، `address`، `lat`/`lng`، `patrol_times`، `duration_min` (10-480، افتراضيًا 60)، `days`، `guard_worker_id`، `asset_id`، `instructions`؛ التعديل بـ `version` |
+| GET / POST | `/security/sites/:id/checkpoints` | النقاط؛ الإضافة: `name`، `tag` (3-24 حرفًا أو رقمًا أو -، يُحفظ بأحرف كبيرة، فريد في الموقع)، `note`، و`seq` اختياريًا |
+| PATCH | `/security/checkpoints/:id` | `name`، `tag`، `note`، `active` |
+| POST | `/security/patrols/generate` | `{date}`: جولات اليوم لكل موعد؛ تُتخطى المواعيد بلا حارس أو نقاط، أو التي مضت، أو المحجوز حارسها أو سيارتها |
+| GET | `/security/patrols?date=` ، `/security/patrols/:id` | الجولات بعدد النقاط الممسوحة وغير المفحوصة والحوادث؛ التفاصيل فيها كشف النقاط والحوادث |
+| POST | `/security/patrols/:id/scan` | المكتب يسجل أو يصحح نقطة: `{checkpoint_id, event: scanned}` أو `{checkpoint_id, event: skipped, reason}` (no_access، locked، unsafe، other) |
+| POST | `/security/patrols/:id/cancel` | `{reason}` لجولة لم تبدأ |
+| GET / POST | `/security/incidents` | الحوادث (`?open=1`، `?site_id=`)، العالية أولًا؛ التسجيل من المكتب: `site_id`، `category` (intrusion، theft، fire، damage، suspicious، medical، safety، other)، `severity` (low، medium، high)، `description`، `occurred_at` |
+| POST | `/security/incidents/:id/close` | `{note}`: ما الذي تم؛ 409 إن كان مغلقًا |
+| GET | `/security/exceptions?date=` | جولات لم تبدأ بعد 15 دقيقة [تخمين]، مواقع تعمل بلا حارس أو نقاط، نقاط لم تُفحص، نقاط لم تُفحص في آخر 3 جولات [تخمين]، والحوادث المفتوحة |
+| GET | `/security/report?from=&to=` | الجولات والمكتملة والمتأخرة والنقاط والممسوحة والتغطية % والحوادث (العالية والمفتوحة)، إجمالًا ولكل موقع، والحوادث حسب النوع |
+
+من التطبيق: مهمة `security@1` تحمل `kind: patrol` و`site_code`، `site_name`، `slot`، `checkpoints`، `instructions`، `address`، و`security` (النقاط بتسجيلها وعدد الحوادث). عمليتا مزامنة أثناء الجولة: `{type: 'scan', checkpoint_id, event, tag, reason, lat, lng}` و`{type: 'incident', category, severity, note (الوصف), lat, lng}`. الرفض: `tag_required`، `tag_mismatch`، `skip_reason_required`، `unknown_checkpoint`، `category_required`، `description_required`. لا تكتمل الجولة قبل تسجيل كل النقاط (`checkpoints_open`). أسباب التعذّر: site_closed، guard_unwell، vehicle_breakdown، emergency_elsewhere، other.
+
 ## قطاع نقل الأثاث moving (القطاع 5)
 
 طلب النقل (`MV-n`) ينقل بيتًا أو مكتبًا من عنوان إلى عنوان. المراحل: `new` بانتظار المعاينة والسعر ← `quoted` بانتظار رد العميل ← `accepted` بانتظار حجز الطاقم ← `booked` ← `moving` (السائق بدأ) ← `delivered` (فُرّغ) ← `closed`، أو `canceled`. ساعات الحجز وعدد العمال تُقترح من الحجم (غرفة ساعتان وعامل، شقة غرفتين 5 ساعات و3 عمال، فيلا 10 ساعات و6 عمال) [تخمين]. العربون يُسجَّل فقط: المنصة لا تحتفظ بأموال العملاء. يوم النقل: الشاحنة والسائق على المهمة الرئيسية `MV-n-1`، وكل عامل على مهمة طاقم `MV-n-1-H1`… تحجزه حصريًا لنفس النافذة. الأسعار من المكتب.

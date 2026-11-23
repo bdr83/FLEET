@@ -72,6 +72,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'service', sector: 22, label: 'الصيانة الفنية', hint: 'بلاغات صيانة بأولوية وموعد استجابة، زيارات الفنيين، القطع المستخدمة، الصيانة الدورية' },
   { code: 'waste', sector: 23, label: 'جمع النفايات والتنظيف', hint: 'خطوط جمع ثابتة لكابسات النفايات، نقاط جمع بحاويات العملاء، جولات يومية، تسجيل كل نقطة جُمعت أو لم تُجمع بسبب، تذاكر ميزان المردم والأطنان' },
   { code: 'utilities', sector: 24, label: 'المرافق: الكهرباء والماء والاتصالات', hint: 'أوامر عمل ميدانية بأولوية وموعد استجابة، فرق بسيارة وقائد، تصاريح الحفر، العزل وقائمة السلامة، الإصلاح وإعادة الطريق، زمن الاستجابة والانقطاع' },
+  { code: 'security', sector: 25, label: 'الحراسة والدوريات', hint: 'مواقع العملاء ونقاط التفتيش برموزها، جولات الحراس اليومية، المسح أو التخطي بسبب، بلاغات الحوادث بالخطورة، التغطية والاستثناءات' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -349,6 +350,13 @@ export const WS_MISS: Record<string, string> = { no_access: 'لا يمكن ال�
 export const WS_EVENT: Record<string, { label: string; tone: string }> = { collected: tone('جُمعت', 'success'), missed: tone('لم تُجمع', 'danger') };
 export const WS_FAIL: Record<string, string> = { facility_closed: 'المردم مغلق' };
 Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(WS_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+/** Security guarding and patrols (security pack) labels. */
+export const SC_EVENT: Record<string, { label: string; tone: string }> = { scanned: tone('مُسحت', 'success'), skipped: tone('لم تُفحص', 'danger') };
+export const SC_SKIP: Record<string, string> = { no_access: 'لا يمكن الوصول', locked: 'مقفلة', unsafe: 'غير آمن', other: 'سبب آخر' };
+export const SC_CATEGORY: Record<string, string> = { intrusion: 'تسلل', theft: 'سرقة', fire: 'حريق أو دخان', damage: 'ضرر أو عطل', suspicious: 'اشتباه', medical: 'حالة طبية', safety: 'خطر سلامة', other: 'أخرى' };
+export const SC_SEVERITY: Record<string, { label: string; tone: string }> = { high: tone('عالية', 'danger'), medium: tone('متوسطة', 'warning'), low: tone('منخفضة', 'info') };
+export const SC_FAIL: Record<string, string> = { site_closed: 'الموقع مغلق', guard_unwell: 'الحارس متوعك', emergency_elsewhere: 'طارئ في موقع آخر' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(SC_FAIL).filter(([k]) => !(k in FAIL_REASON))));
 /** Cranes and lifting (cranes pack) labels. */
 export const CR_STATUS: Record<string, { label: string; tone: string }> = {
   planned: tone('مخططة', 'info'), done: tone('نُفذت', 'success'), aborted: tone('أُوقفت', 'danger'), canceled: tone('ملغاة'),

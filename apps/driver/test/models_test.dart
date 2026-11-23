@@ -421,6 +421,21 @@ void main() {
     expect(rejectReasons['permit_expired'], isNotNull);
   });
 
+  test('guard patrol: checkpoints to scan or skip; the patrol stays open while one is unmarked', () {
+    final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'security@1', 'attributes': {'kind': 'patrol', 'address': 'الري'}, 'version': 1,
+      'security': {'patrol_id': 'p', 'incidents': 1, 'checkpoints': [
+        {'id': 'a', 'seq': 1, 'name': 'البوابة', 'event': 'scanned'},
+        {'id': 'b', 'seq': 2, 'name': 'المخزن', 'event': null},
+      ]}});
+    expect((t.isSecurity, t.address, t.incidentCount, t.checkpointList.length), (true, 'الري', 1, 2));
+    expect(t.securityFinishBlock, 'checkpoints_open');
+    expect(nextActions(t), [TaskAction.complete, TaskAction.fail]);
+    final done = t.copyWith(security: {...t.security!, 'checkpoints': [{'id': 'a', 'seq': 1, 'name': 'البوابة', 'event': 'scanned'}, {'id': 'b', 'seq': 2, 'name': 'المخزن', 'event': 'skipped', 'reason': 'locked'}]});
+    expect(done.securityFinishBlock, isNull);
+    expect(actionLabel(t, TaskAction.complete), 'أنهيت الجولة');
+    expect(failReasonsFor(t), securityFailReasons);
+  });
+
   test('crane day: lift plans, critical blocked until approved, the day stays open while a lift is planned', () {
     final t = DriverTask.fromJson({'id': 't', 'status': 'in_progress', 'sector_pack': 'equipment@1', 'attributes': {}, 'version': 1, 'lifts': [
       {'id': 'a', 'ref': 'LP-1', 'time': '09:00:00', 'description': 'جسر', 'load_t': 10, 'radius_m': 8, 'rated_t': 20, 'utilization': 50, 'critical': false, 'approved': false, 'status': 'done', 'wind_limit_ms': 9},
