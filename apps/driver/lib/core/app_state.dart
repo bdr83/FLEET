@@ -360,6 +360,16 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Pest control: arrived, or the treatment (products used, infestation, receiver) checked online at once.
+  Future<String?> pestStage(String taskId, String code, {List<Map<String, dynamic>>? applications, String? infestation, String? receivedBy, String? note}) async {
+    final p = await tracker.current();
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': code, 'applications': ?applications, 'infestation': ?infestation, 'received_by': ?receivedBy, 'note': ?note,
+      if (p != null) 'lat': p.latitude, if (p != null) 'lng': p.longitude}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(stage: code));
+    return null;
+  }
+
   /// Tour bus: the group on board, with the head count and the odometer (checked online at once against the seats).
   Future<String?> tourBoarded(String taskId, {required int headcount, required int odometer}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tr_boarded', 'headcount': headcount, 'odometer_km': odometer}, wait: true);
