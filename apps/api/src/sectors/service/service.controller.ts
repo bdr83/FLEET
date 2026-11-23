@@ -127,6 +127,10 @@ export class ServiceController {
       if (['scheduled', 'on_site'].includes(j.state)) throw new ConflictException('a visit is already open');
       if (!(await c.query(`SELECT 1 FROM workforce.worker WHERE id = $1 AND legal_entity_id = $2 AND status = 'active'`, [tech, j.legal_entity_id])).rowCount) throw new BadRequestException('unknown technician_worker_id');
       if (asset && !(await c.query(`SELECT 1 FROM fleet.asset WHERE id = $1 AND legal_entity_id = $2 AND status NOT IN ('out_of_service','retired')`, [asset, j.legal_entity_id])).rowCount) throw new BadRequestException('unknown asset_id');
+      // a failed visit's booking is released so the technician can be booked again for the same time
+      for (const x of j.visits.filter((y: { status: string }) => y.status === 'failed')) {
+        await c.query('UPDATE ops.assignment SET active = false, ended_at = now() WHERE task_id = $1 AND active', [x.task_id]);
+      }
       const seq = j.visits.length + 1;
       const end = new Date(at.getTime() + dur * 60_000);
       const task = await createTask(c, a, {

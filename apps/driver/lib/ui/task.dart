@@ -142,6 +142,20 @@ class TaskScreen extends StatelessWidget {
           ]))),
           const SizedBox(height: 12),
         ],
+        if (t.isTanker) ...[
+          Card(key: const Key('tanker-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('صهريج · ${t.attributes['order_ref'] ?? ''}', style: text.labelMedium),
+            Text(tankerProductLabels[t.product] ?? t.product ?? '', style: text.titleLarge),
+            if (t.qtyL != null) Row(children: [const Text('الكمية: '), Ltr('${t.qtyL} L', style: text.headlineSmall)]),
+            if (t.capacityL != null) Text('سعة الصهريج ${t.capacityL} لتر'),
+            if (t.attributes['customer_name'] != null) Text('العميل: ${t.attributes['customer_name']}'),
+            if (t.attributes['contact_phone'] != null) Row(children: [const Text('الهاتف: '), Ltr('${t.attributes['contact_phone']}')]),
+            if (t.attributes['notes'] != null) Text('${t.attributes['notes']}'),
+            const SizedBox(height: 4),
+            const Text('سجّل اللترات المعبأة من العدّاد ومحطة التعبئة، ثم اللترات المفرّغة واسم المستلم.'),
+          ]))),
+          const SizedBox(height: 12),
+        ],
         if (t.isContainer) ...[
           Card(key: const Key('container-card'), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('حاوية · ${t.attributes['job_ref'] ?? ''} · ${containerLegLabels[t.attributes['leg']] ?? ''}', style: text.labelMedium),
@@ -361,6 +375,18 @@ class _ActionsState extends State<_Actions> {
         final r = await _cargoForm(context, 'التحميل', 'تأكيد التحميل', receiver: false);
         if (r == null) return;
         await s.milestone(task.id, 'loaded', extra: {'weight_kg': ?r.weightKg, 'seal_no': ?r.seal});
+      case TaskAction.tankFilled:
+      case TaskAction.tankDischarged:
+        final fill = action == TaskAction.tankFilled;
+        final r = await _tankForm(context, fill: fill);
+        if (r == null) return;
+        final err = fill ? await s.tankFilled(task.id, litres: r.litres, source: r.text) : await s.tankDischarged(task.id, litres: r.litres, receivedBy: r.text!);
+        if (!context.mounted) return;
+        if (err != null) return toast(context, err, error: true);
+        if (!fill) {
+          toast(context, s.offline ? 'سُجّل التفريغ وسيُرسل عند عودة الاتصال' : 'تم التفريغ وانتهى الطلب');
+          Navigator.of(context).pop();
+        }
       case TaskAction.ctrPicked:
         final r = await _ctrForm(context, pick: true);
         if (r == null) return;
@@ -490,6 +516,32 @@ class _ActionsState extends State<_Actions> {
               receiver: receiver ? other.text.trim() : null,
             )),
             child: Text(confirm),
+          ),
+        ]),
+      )),
+    );
+  }
+
+  /// Tanker: litres filled (with the source, optional) or discharged (with the receiver, required).
+  Future<({int litres, String? text})?> _tankForm(BuildContext context, {required bool fill}) {
+    final l = TextEditingController(text: fill && task.qtyL != null ? '${task.qtyL}' : ''), who = TextEditingController();
+    bool ok() => parseLitres(l.text) != null && (fill || who.text.trim().isNotEmpty);
+    return showModalBottomSheet<({int litres, String? text})>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(fill ? 'التعبئة' : 'التفريغ', style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          TextField(key: const Key('litres'), controller: l, autofocus: true, keyboardType: TextInputType.number, textDirection: TextDirection.ltr,
+              decoration: InputDecoration(labelText: fill ? 'اللترات المعبأة (من العدّاد)' : 'اللترات المفرّغة (من العدّاد)'), onChanged: (_) => set(() {})),
+          TextField(key: const Key('tank-text'), controller: who, decoration: InputDecoration(labelText: fill ? 'محطة التعبئة' : 'اسم المستلم'), onChanged: (_) => set(() {})),
+          const SizedBox(height: 12),
+          FilledButton(
+            key: const Key('tank-save'),
+            onPressed: ok() ? () => Navigator.pop(ctx, (litres: parseLitres(l.text)!, text: who.text.trim().isEmpty ? null : who.text.trim())) : null,
+            child: Text(fill ? 'تأكيد التعبئة' : 'تأكيد التفريغ'),
           ),
         ]),
       )),

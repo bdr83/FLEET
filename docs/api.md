@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، shuttle، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -561,4 +561,46 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 - إنهاء المهمة يحتاج `ctr_dropped`.
 
 رموز الرفض: `container_required`، `container_mismatch`، `previous_leg_open`، `receiver_required`، `gate_ref_required`.
+
+## قطاع صهاريج المياه والديزل والوقود tankers (القطاع 7)
+
+المنتجات: `water_fresh` (ماء عذب)، `water_brackish` (ماء صليبي)، `diesel`، `kerosene`.
+
+**الصهاريج:**
+- يُسجَّل كل صهريج بنوعه: `water` للماء أو `fuel` للوقود، وبسعته باللتر.
+- لا يُسند طلب وقود لصهريج ماء، ولا العكس، ولا كمية أكبر من سعة الصهريج.
+- نوع المركبة `tanker` أُضيف إلى سجل المركبات.
+
+**الطلبات:**
+- كل طلب (`TK-n`) مهمة `tankers@1` تحجز الصهريج والسائق حصريًا خلال نافذة التوصيل.
+- النافذة ساعتان من وقت البدء إن لم يُحدَّد غير ذلك [تخمين].
+- عند تعذّر الرحلة يُعاد إسناد الطلب، وتُحرَّر الحجوزات السابقة.
+
+**الفاقد والأسعار:**
+- الفاقد هو المعبأ ناقص المفرّغ. يُنبَّه عليه فوق 0.5% للوقود و3% للماء [تخمين].
+- يُنبَّه على أي توصيل يقل عن المطلوب بأكثر من 5% [تخمين].
+- السعر لكل 1000 لتر من المكتب، والمبلغ = المفرّغ × السعر.
+
+| المسار | الوصف |
+|---|---|
+| `GET /v1/tankers/vehicles` | المركبات مع نوع الصهريج وسعته |
+| `PUT /vehicles/:assetId` | يسجّل المركبة كصهريج: `{product_class: water\|fuel, capacity_l 500-60000}`. الصلاحية المطلوبة: fleet:write |
+| `GET/POST /orders` | الإنشاء: `{legal_entity_id, customer_id, site{name?, area, ...}, product, qty_l 100-60000, from?, to?, unit_price?, notes?}`. التصفية: `?date=` و`?state=` |
+| `GET /orders/:id` | يرجع الطلب مع `state` و`loss_l` و`loss_pct` و`loss_flag` و`short` و`amount` |
+| `POST /orders/:id/assign` | `{driver_worker_id, asset_id}`. يرجع 400 `not_a_tanker`، أو 409 `wrong_tanker` أو `too_small` أو `vehicle_booked` أو `driver_booked`. يُستخدم أيضًا لإعادة الإسناد بعد التعذّر |
+| `POST /orders/:id/record` | تسجيل من الإيصال الورقي: `{loaded_l?, delivered_l, received_by}` |
+| `POST /orders/:id/cancel` | `{reason}`، قبل بدء الرحلة فقط |
+| `GET/POST /schedules` | الطلبات الثابتة: `{legal_entity_id, customer_id, site, product, qty_l, days[0-6] (0 = الأحد), at_time HH:MM, window_min?, unit_price?}` |
+| `POST /schedules/:id/stop` | إيقاف طلب ثابت |
+| `POST /schedules/generate` | `{date?}`: ينشئ طلبات ذلك اليوم، مرة واحدة لكل طلب ثابت وتاريخ |
+| `GET /board?date=` | طلبات اليوم |
+| `GET /exceptions` | `unassigned` (بلا صهريج)، `late` (متأخرة)، `failed` (تعذّرت)، `short` (ناقصة)، `losses` (فاقد)، لآخر 7 أيام وحتى يومين قادمين |
+| `GET /report?from&to` | الطلبات واللترات المطلوبة والمفرّغة والفاقد والمبلغ، مع تفصيل حسب المنتج وحسب الصهريج |
+
+**تطبيق السائق:** تحمل المهمة في `attributes` الحقول `product` و`qty_l` و`capacity_l` و`address` و`customer_name` و`contact_phone` و`notes`. في `POST /v1/driver/sync`:
+- `tank_filled` مع `litres` و`note` (اسم محطة التعبئة).
+- ثم `tank_discharged` مع `litres` و`received_by`.
+- لا تنتهي المهمة إلا بعد `tank_discharged`.
+
+رموز الرفض: `litres_required`، `over_capacity`، `more_than_loaded`، `receiver_required`.
 

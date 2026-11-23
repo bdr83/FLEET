@@ -55,6 +55,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'courier', sector: 4, label: 'البريد والشحن السريع', hint: 'بوليصات ومحطات، مسح الباركود، محاولات التسليم، الإرجاع للمرسل' },
   { code: 'moving', sector: 5, label: 'نقل الأثاث', hint: 'طلبات نقل بمعاينة وقائمة أغراض، عرض سعر وعربون، شاحنة وطاقم ليوم النقل، مطالبات الأضرار والتقييم' },
   { code: 'containers', sector: 6, label: 'الحاويات والموانئ', hint: 'حاويات استيراد وتصدير بين الميناء والساحة والعميل، تأكيد رقم الحاوية، إيصال البوابة، مراقبة الأرضيات والتأخير' },
+  { code: 'tankers', sector: 7, label: 'صهاريج المياه والديزل والوقود', hint: 'طلبات توصيل الماء والديزل باللتر، صهاريج ماء ووقود بسعاتها، اللترات المعبأة والمفرّغة، الفاقد، الطلبات الثابتة' },
   { code: 'warehouse', sector: 8, label: 'المستودعات والتخزين', hint: 'مواقع تخزين، استلام وصرف، أقدم صلاحية أولًا، جرد، تخزين للعملاء' },
   { code: 'ecommerce', sector: 9, label: 'شحن التجارة الإلكترونية', hint: 'متاجر ترسل طلباتها بمفتاح API أو ملف، تتبع للمتجر، مرتجعات، كشف COD' },
   { code: 'shuttle', sector: 11, label: 'نقل الموظفين', hint: 'خطوط ثابتة بمحطات ومواعيد، رحلات يومية، تسجيل صعود الركاب، تقرير لكل عميل' },
@@ -93,7 +94,7 @@ export function ago(v: string | null | undefined): string {
 const tone = (label: string, t = 'muted') => ({ label, tone: t });
 export const ASSET_TYPE: Record<string, string> = {
   car: 'سيارة', motorbike: 'دراجة نارية', van: 'فان', pickup: 'بيك أب', truck: 'شاحنة', mixer: 'خلاطة خرسانة', pump: 'مضخة', trailer: 'مقطورة', bus: 'باص',
-  excavator: 'حفارة', loader: 'شيول', crane: 'رافعة (كرين)', forklift: 'رافعة شوكية', bulldozer: 'بلدوزر', roller: 'مدحلة', grader: 'جريدر', other: 'أخرى',
+  excavator: 'حفارة', loader: 'شيول', crane: 'رافعة (كرين)', forklift: 'رافعة شوكية', bulldozer: 'بلدوزر', roller: 'مدحلة', grader: 'جريدر', tanker: 'صهريج', other: 'أخرى',
 };
 export const ASSET_STATUS: Record<string, { label: string; tone: string }> = {
   available: tone('متاحة', 'success'), in_use: tone('قيد الاستخدام', 'info'), out_of_service: tone('خارج الخدمة', 'danger'), retired: tone('مستبعدة'),
@@ -322,4 +323,12 @@ export const CT_LEG: Record<string, string> = { port_to_customer: 'من المي
 export const CT_STATE: Record<string, { label: string; tone: string }> = {
   waiting: { label: 'بانتظار السحب', tone: 'warning' }, in_transit: { label: 'على الطريق', tone: 'info' }, at_customer: { label: 'عند العميل', tone: 'info' },
   done: { label: 'أُرجعت، جاهزة للإغلاق', tone: 'success' }, closed: { label: 'مغلقة', tone: 'muted' }, canceled: { label: 'ملغاة', tone: 'muted' },
+};
+
+/** Tankers (tankers pack) labels. */
+export const TK_PRODUCT: Record<string, string> = { water_fresh: 'ماء عذب', water_brackish: 'ماء صليبي', diesel: 'ديزل', kerosene: 'كيروسين' };
+export const TK_CLASS: Record<string, string> = { water: 'ماء', fuel: 'وقود' };
+export const TK_STATE: Record<string, { label: string; tone: string }> = {
+  new: { label: 'بلا صهريج', tone: 'warning' }, assigned: { label: 'مسند', tone: 'info' }, on_way: { label: 'في الطريق', tone: 'info' },
+  delivered: { label: 'وُصّل', tone: 'success' }, failed: { label: 'تعذّر، يُعاد إسناده', tone: 'danger' }, canceled: { label: 'ملغى', tone: 'muted' },
 };

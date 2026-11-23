@@ -204,6 +204,9 @@ export class MovingController {
         await c.query(`UPDATE ops.task SET status = 'canceled', version = version + 1, updated_at = now() WHERE id = $1`, [t.task_id]);
         await event(c, a, t.task_id, t.status, 'canceled', `rebooked ${j.ref}`);
       }
+      for (const t of j.crew.filter((x: { status: string }) => x.status === 'failed')) {
+        await c.query('UPDATE ops.assignment SET active = false, ended_at = now() WHERE task_id = $1 AND active', [t.task_id]);
+      }
       const n = (await c.query(`SELECT count(*)::int AS n FROM ops.move_task WHERE job_id = $1 AND role = 'lead'`, [id])).rows[0].n + 1;
       const base = { kind: 'move', move_id: id, move_ref: j.ref, home_size: j.home_size, services: j.services, volume_m3: j.volume_m3, items_count: j.items.reduce((s: number, x: { qty: number }) => s + x.qty, 0),
         fragile: j.items.filter((x: { fragile: boolean }) => x.fragile).map((x: { name: string }) => x.name).slice(0, 20),

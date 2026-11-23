@@ -275,6 +275,23 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Tanker: the litres filled and where (checked online at once against the tanker's capacity).
+  Future<String?> tankFilled(String taskId, {required int litres, String? source}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tank_filled', 'litres': litres, 'note': ?source}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(stage: 'tank_filled'));
+    return null;
+  }
+
+  /// Tanker: the litres discharged and the receiver; then ends the trip.
+  Future<String?> tankDischarged(String taskId, {required int litres, required String receivedBy}) async {
+    final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'tank_discharged', 'litres': litres, 'received_by': receivedBy}, wait: true);
+    if (r != null && !r.ok) return _refused(taskId, r);
+    _local(taskId, (x) => x.copyWith(status: 'completed', stage: 'tank_discharged'));
+    await _syncOp(taskId, {'type': 'task_status', 'to_status': 'completed'});
+    return null;
+  }
+
   /// Container leg: picked up with the number read on the box (checked by the server) and the seal; checked online at once.
   Future<String?> containerPicked(String taskId, {required String containerNo, String? sealNo}) async {
     final r = await _syncOp(taskId, {'type': 'milestone', 'code': 'ctr_picked', 'container_no': containerNo, 'seal_no': ?sealNo}, wait: true);
