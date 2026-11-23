@@ -46,6 +46,7 @@ import { WasteController } from './sectors/waste/waste.controller';
 import { UtilitiesController } from './sectors/utilities/utilities.controller';
 import { SecurityController } from './sectors/security/security.controller';
 import { PestController } from './sectors/pest/pest.controller';
+import { LandscapeController } from './sectors/landscape/landscape.controller';
 import { EquipmentController } from './sectors/equipment/equipment.controller';
 import { RentalController } from './sectors/rental/rental.controller';
 import { ServiceController } from './sectors/service/service.controller';
@@ -59,7 +60,7 @@ import { MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
 import { MaintenanceService } from './maintenance/maintenance.service';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, ConcreteController, StaffingController, InternalController, DistributionController, FreightController, ColdchainController, CourierController, WarehouseController, EcommerceController, EcomApiController, ShuttleController, EquipmentController, RentalController, ServiceController, MovingController, ContainersController, TankersController, SchoolController, TaxiController, TourController, OilgasController, CranesController, WasteController, UtilitiesController, SecurityController, PestController, TrackController, FilesController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, ConcreteController, StaffingController, InternalController, DistributionController, FreightController, ColdchainController, CourierController, WarehouseController, EcommerceController, EcomApiController, ShuttleController, EquipmentController, RentalController, ServiceController, MovingController, ContainersController, TankersController, SchoolController, TaxiController, TourController, OilgasController, CranesController, WasteController, UtilitiesController, SecurityController, PestController, LandscapeController, TrackController, FilesController, TasksController],
   providers: [
     DbService,
     OtpService,

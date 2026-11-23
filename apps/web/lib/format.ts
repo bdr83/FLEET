@@ -74,6 +74,7 @@ export const PACK_INFO: { code: string; sector: number; label: string; hint: str
   { code: 'utilities', sector: 24, label: 'المرافق: الكهرباء والماء والاتصالات', hint: 'أوامر عمل ميدانية بأولوية وموعد استجابة، فرق بسيارة وقائد، تصاريح الحفر، العزل وقائمة السلامة، الإصلاح وإعادة الطريق، زمن الاستجابة والانقطاع' },
   { code: 'security', sector: 25, label: 'الحراسة والدوريات', hint: 'مواقع العملاء ونقاط التفتيش برموزها، جولات الحراس اليومية، المسح أو التخطي بسبب، بلاغات الحوادث بالخطورة، التغطية والاستثناءات' },
   { code: 'pest', sector: 26, label: 'مكافحة الحشرات والقوارض', hint: 'أوامر المكافحة للمنازل والمطاعم والمنشآت، سجل المبيدات ورقم تسجيلها، ترخيص الفني، الكميات المستخدمة ووقت منع الدخول، الضمان وإعادة الزيارة، العقود الدورية' },
+  { code: 'landscape', sector: 27, label: 'تنسيق الحدائق وصيانتها', hint: 'عقود صيانة حدائق الفلل والمجمعات، الخدمات المتعاقد عليها وأيام الزيارة، زيارات يومية لرئيس الطاقم، الخدمات المنفذة وما لم يُنفذ بسبب، فحص شبكة الري وأعطالها، المخلفات الخضراء' },
   { code: 'distribution', sector: 29, label: 'التوزيع اليومي (مصانع، مطاعم، تجزئة)', hint: 'مسارات توزيع، مرتجعات، تسوية نقدية' },
 ];
 /** Task types of the packs a company turned on (all when the list is unknown). */
@@ -370,6 +371,16 @@ export const PC_STATE: Record<string, { label: string; tone: string }> = {
 };
 export const PC_FAIL: Record<string, string> = { customer_absent: 'العميل غير موجود', customer_canceled: 'العميل ألغى', premises_not_ready: 'المكان غير مجهّز' };
 Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(PC_FAIL).filter(([k]) => !(k in FAIL_REASON))));
+/** Landscaping (landscape pack) labels. */
+export const LS_SERVICE: Record<string, string> = { mowing: 'قص العشب', pruning: 'تقليم', irrigation: 'صيانة الري', fertilizing: 'تسميد', planting: 'زراعة', weeding: 'إزالة الحشائش', palm_care: 'خدمة النخيل', pest_spray: 'رش مبيد زراعي', cleanup: 'تنظيف', other: 'أخرى' };
+export const LS_IRRIGATION: Record<string, { label: string; tone: string }> = {
+  ok: tone('سليمة', 'success'), leak: tone('تسريب', 'danger'), broken: tone('عطل', 'danger'), dry_area: tone('منطقة جافة', 'warning'), not_checked: tone('لم تُفحص', 'muted'),
+};
+export const LS_STATE: Record<string, { label: string; tone: string }> = {
+  assigned: tone('مجدولة', 'info'), en_route: tone('في الطريق', 'primary'), on_site: tone('في الحديقة', 'primary'), done: tone('أُنجزت', 'success'), failed: tone('تعذّرت', 'danger'), canceled: tone('ملغاة'),
+};
+export const LS_FAIL: Record<string, string> = { no_access: 'تعذّر الدخول', customer_canceled: 'العميل ألغى', weather: 'الطقس', vehicle_breakdown: 'عطل المركبة' };
+Object.assign(FAIL_REASON, Object.fromEntries(Object.entries(LS_FAIL).filter(([k]) => !(k in FAIL_REASON))));
 /** Cranes and lifting (cranes pack) labels. */
 export const CR_STATUS: Record<string, { label: string; tone: string }> = {
   planned: tone('مخططة', 'info'), done: tone('نُفذت', 'success'), aborted: tone('أُوقفت', 'danger'), canceled: tone('ملغاة'),

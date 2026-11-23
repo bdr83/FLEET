@@ -31,6 +31,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/utilities', label: 'أعمال المرافق', perm: 'tasks:read', pack: 'utilities' },
   { href: '/security', label: 'الحراسة والدوريات', perm: 'tasks:read', pack: 'security' },
   { href: '/pest', label: 'مكافحة الحشرات', perm: 'tasks:read', pack: 'pest' },
+  { href: '/landscape', label: 'الحدائق', perm: 'tasks:read', pack: 'landscape' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
   { href: '/service', label: 'الصيانة الفنية', perm: 'tasks:read', pack: 'service' },
   { href: '/moving', label: 'نقل الأثاث', perm: 'tasks:read', pack: 'moving' },

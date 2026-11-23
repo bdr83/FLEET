@@ -436,6 +436,18 @@ void main() {
     expect(failReasonsFor(t), securityFailReasons);
   });
 
+  test('garden visit: arrive, then the work done, then finish', () {
+    final t = task('in_progress', pack: 'landscape@1', attrs: {'kind': 'garden_visit', 'address': 'الشويخ', 'services': ['mowing']});
+    expect((t.isLandscape, t.address), (true, 'الشويخ'));
+    expect(nextActions(t), [TaskAction.lsArrived, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'ls_arrived')), [TaskAction.lsDone, TaskAction.fail]);
+    expect(nextActions(t.copyWith(stage: 'ls_done')), [TaskAction.complete]);
+    expect(actionLabel(t, TaskAction.lsDone), 'تسجيل العمل المنجز');
+    expect(failReasonsFor(t), landscapeFailReasons);
+    expect(rejectReasons['undone_note_required'], isNotNull);
+    expect(stageLabels['ls_arrived'], 'في الحديقة');
+  });
+
   test('pest visit: arrive, then the treatment, then done', () {
     final t = task('in_progress', pack: 'pest@1', attrs: {'kind': 'pest_job', 'address': 'شارع البلاجات، السالمية'});
     expect((t.isPest, t.address), (true, 'شارع البلاجات، السالمية'));

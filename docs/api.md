@@ -662,6 +662,23 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 من التطبيق: مهمة `pest@1` تحمل `kind: pest_job` و`job_ref`، `premises`، `pests`، `service`، `notes`، `customer_name`، `contact_phone`، `address`، `in_warranty`، `previous`، و`products` ([{id, name, unit, reentry_hours}]). المحطات أثناء `in_progress`: `pc_arrived` ثم `pc_treated` مع `applications` ([{product_id, qty, location}]، حتى 20)، و`infestation` (none، low، medium، high)، و`received_by`، و`note`. الرفض: `stage_out_of_order`، `infestation_required`، `receiver_required`، `products_required` (إلا للكشف فقط)، `products_invalid`، `unknown_product`. الإنهاء يحتاج `pc_treated` (`proof_required`)، وإنهاء أمر بعقد دوري يُنشئ الأمر التالي بعد `repeat_days`. وقت السماح بالدخول = وقت العلاج + أطول مدة منع بين المبيدات المستخدمة. أسباب التعذّر: customer_absent، no_access، customer_canceled، premises_not_ready، other.
 
+## قطاع تنسيق الحدائق وصيانتها landscape (القطاع 27)
+
+الحديقة (موقع العقد) لعميل: رمز (حتى 12 حرفًا)، والمساحة بالمتر المربع، والخدمات المتعاقد عليها (mowing، pruning، irrigation، fertilizing، planting، weeding، palm_care، pest_spray، cleanup، other)، وأيام الزيارة (1 الاثنين ... 7 الأحد، افتراضيًا الاثنين والخميس [تخمين])، ووقت الزيارة ومدتها (افتراضيًا 120 دقيقة)، ورئيس الطاقم وعدد العمال، ومركبة اختيارية، وهل فيها شبكة ري `irrigation`.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / POST / PATCH | `/landscape/sites` ، `/landscape/sites/:id` | الحدائق: `legal_entity_id`، `code`، `name`، `customer_id`، `services`، واختياريًا `area`، `address`، `lat`/`lng`، `contact_phone`، `area_m2`، `days`، `visit_time`، `duration_min`، `lead_worker_id`، `crew_size`، `asset_id`، `irrigation`، `instructions`؛ التعديل بـ `version`؛ كل حديقة تعرض `open_faults` |
+| POST | `/landscape/visits/generate` | `{date}`: زيارة لكل حديقة فعّالة تُزار ذلك اليوم (`LV-رمز-تاريخ`)، تحجز رئيس الطاقم والمركبة؛ تعيد `created` و`existing` و`skipped` (no_lead، lead_booked، lead_inactive، vehicle_booked، vehicle_out_of_service، past) |
+| POST | `/landscape/visits` | زيارة إضافية: `site_id`، `date`، واختياريًا `time`، `services`، `lead_worker_id`، `asset_id`، `note`؛ المرجع `LV-رمز-تاريخ-n` |
+| GET | `/landscape/visits?date=` ، `/landscape/visits/:id` | الزيارات مع `state` (assigned، en_route، on_site، done، failed، canceled) والخدمات المخططة والمنفذة وحالة الري والأكياس |
+| POST | `/landscape/visits/:id/cancel` | `{reason}` قبل بدء الزيارة |
+| POST | `/landscape/visits/:id/close-fault` | `{note}` يغلق عطل الري (leak، broken، dry_area) المسجّل في الزيارة |
+| GET | `/landscape/exceptions?date=` | `late_start` (لم تبدأ بعد 30 دقيقة [تخمين])، `no_lead`، `services_undone` (آخر 7 أيام مع `missing`)، `open_faults`، `irrigation_unchecked` (لم تُفحص في آخر 3 زيارات [تخمين]) |
+| GET | `/landscape/report?from=&to=` | الزيارات والمنجزة والمتعذرة والإضافية والمتأخرة، والخدمات المخططة والمنفذة ونسبة التنفيذ، وأكياس المخلفات، وأعطال الري؛ إجمالًا وحسب الحديقة، و`services` حسب الخدمة (`key`، `planned`، `done`) |
+
+من التطبيق: مهمة `landscape@1` تحمل `kind: garden_visit` و`site_code`، `site_name`، `customer_name`، `contact_phone`، `services`، `irrigation`، `crew_size`، `area_m2`، `extra`، `instructions`، `address`. المحطات أثناء `in_progress`: `ls_arrived` ثم `ls_done` مع `services` (المنفذة)، و`irrigation` (ok، leak، broken، dry_area، not_checked؛ مطلوبة إن كانت في الحديقة شبكة)، و`waste_bags` (0-500)، و`received_by` اختياريًا، و`note` (مطلوبة إن بقيت خدمة مخططة بلا تنفيذ). الرفض: `stage_out_of_order`، `services_required`، `services_invalid`، `undone_note_required`، `irrigation_required`، `waste_bags_required`. الإنهاء يحتاج `ls_done` (`proof_required`). أسباب التعذّر: no_access، customer_canceled، weather، vehicle_breakdown، other.
+
 ## قطاع نقل الأثاث moving (القطاع 5)
 
 طلب النقل (`MV-n`) ينقل بيتًا أو مكتبًا من عنوان إلى عنوان. المراحل: `new` بانتظار المعاينة والسعر ← `quoted` بانتظار رد العميل ← `accepted` بانتظار حجز الطاقم ← `booked` ← `moving` (السائق بدأ) ← `delivered` (فُرّغ) ← `closed`، أو `canceled`. ساعات الحجز وعدد العمال تُقترح من الحجم (غرفة ساعتان وعامل، شقة غرفتين 5 ساعات و3 عمال، فيلا 10 ساعات و6 عمال) [تخمين]. العربون يُسجَّل فقط: المنصة لا تحتفظ بأموال العملاء. يوم النقل: الشاحنة والسائق على المهمة الرئيسية `MV-n-1`، وكل عامل على مهمة طاقم `MV-n-1-H1`… تحجزه حصريًا لنفس النافذة. الأسعار من المكتب.
