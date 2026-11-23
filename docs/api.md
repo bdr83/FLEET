@@ -25,7 +25,7 @@
 
 | الطريقة | المسار | الوصف |
 |---|---|---|
-| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، equipment، rental، service) والمفعّلة للشركة |
+| GET | `/packs` | `{available, enabled}`: الحزم المتاحة (delivery، freight، staffing، concrete، internal، distribution، coldchain، courier، moving، containers، tankers، warehouse، ecommerce، school، shuttle، taxi، equipment، rental، service) والمفعّلة للشركة |
 | PUT | `/packs` | `{packs: [...]}` بصلاحية `org:write`؛ يُسجَّل في سجل التدقيق |
 
 `POST /tenants` يقبل `packs` (بدونها تُفعَّل كل الحزم). مسارات حزمة غير مفعّلة ترد 403 `pack_disabled`، وكذلك إنشاء مهمة من نوعها. أنواع المهام العامة (خارج الحزم) مسموحة دائمًا. `GET /me` يعيد `packs`.
@@ -452,6 +452,25 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 | `GET /report?from&to` | لكل عميل: الرحلات والمنفذة والملغاة، الانطلاق في الموعد، الركاب، الغياب، إشغال المقاعد |
 
 السائق: تحمل `GET /v1/driver/tasks` حقل `shuttle {trip_id, riders[{id, name, staff_no, stop_seq, event}]}`. وفي `POST /v1/driver/sync` عملية جديدة `{type: 'board', task_id, rider_id, event}` تُقبل بعد قبول الرحلة وحتى انتهائها.
+
+## قطاع التاكسي والليموزين taxi (القطاع 12)
+
+حجوزات تاكسي الطلب والليموزين: كل حجز مهمة `TX-n-<محاولة>` تحجز سيارة من الفئة وسائقها من موعد الالتقاط لمدة `hold_min` (60 دقيقة افتراضيًا [تخمين])، وتتحرر السيارة عند النزول.
+
+| الطريقة | المسار | الوصف |
+|---|---|---|
+| GET / PUT | `/taxi/cars` ، `/taxi/cars/:assetId` | سيارات الأسطول وفئاتها (sedan، suv، van، luxury) بصلاحية `fleet:write` |
+| GET / PUT | `/taxi/tariffs` | تعرفة الفئة: `base`، `per_km`، `per_wait_min`، `min_fare` بصلاحية `billing:write` |
+| GET / POST | `/taxi/bookings` | الحجوزات ليوم؛ الإنشاء: `passenger_name`، `passenger_phone`، `pickup`، واختياريًا `dropoff`، `pickup_at` (الآن)، `class`، `pax`، `flight_no`، `customer_id` (حساب شركة)، `fixed_fare` |
+| GET | `/taxi/bookings/:id/candidates` | السيارات (من الفئة، والصالون تخدمه فئة أعلى) والسائقون المتاحون لوقت الحجز |
+| POST | `/taxi/bookings/:id/assign` | `{asset_id, driver_worker_id}`؛ أخطاء `not_a_taxi`، `wrong_class`، `vehicle_booked`، `driver_booked` |
+| POST | `/taxi/bookings/:id/record` | تسجيل المكتب: `km`، `wait_min`، `payment` (cash، card، account)، `fare` اختياري |
+| POST | `/taxi/bookings/:id/fare` | تصحيح أجرة مشوار منتهٍ |
+| POST | `/taxi/bookings/:id/cancel` | إلغاء |
+| GET | `/taxi/exceptions` | بلا سيارة قبل الموعد بـ 30 دقيقة، سائق متأخر 10 دقائق، تعذّرت، بلا أجرة |
+| GET | `/taxi/report?from=&to=` | الإجماليات بطريقة الدفع، والسائقون (النقد المطلوب تسليمه)، وحسابات الشركات، والفئات |
+
+من التطبيق: معالم `tx_arrived` ثم `tx_picked` ثم `tx_dropped` مع `trip_km` و`payment` (أخطاء `payment_required`، `km_required` إلا بأجرة ثابتة، `no_account`). الأجرة = الثابتة أو فتحة العداد + الكيلومترات + الانتظار بعد 5 دقائق مجانية، بحد أدنى. «الراكب لم يحضر» (`passenger_no_show`) فقط بعد الوصول وانتظار 10 دقائق (`not_arrived`، `wait_more`).
 
 ## قطاع تأجير المعدات الثقيلة equipment (القطاع 16)
 

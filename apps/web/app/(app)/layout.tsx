@@ -21,6 +21,7 @@ const NAV: { sec?: string; href?: string; label?: string; perm?: string; pack?: 
   { href: '/warehouse', label: 'المستودعات', perm: 'tasks:read', pack: 'warehouse' },
   { href: '/ecommerce', label: 'طلبات المتاجر', perm: 'tasks:read', pack: 'ecommerce' },
   { href: '/school', label: 'النقل المدرسي', perm: 'tasks:read', pack: 'school' },
+  { href: '/taxi', label: 'التاكسي والليموزين', perm: 'tasks:read', pack: 'taxi' },
   { href: '/shuttle', label: 'نقل الموظفين', perm: 'tasks:read', pack: 'shuttle' },
   { href: '/equipment', label: 'تأجير المعدات', perm: 'tasks:read', pack: 'equipment' },
   { href: '/rental', label: 'تأجير السيارات', perm: 'tasks:read', pack: 'rental' },
