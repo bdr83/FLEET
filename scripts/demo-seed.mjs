@@ -2,15 +2,20 @@
 // Demo data for showing the platform to customers: one demo company per sector, owned by one account, each with its
 // vehicles, field workers, customers and today's work ready for the office page and the driver app.
 //
-// Each sector's field worker logs in to the driver app with  driver-<sector>@demo.q8hub.com  and DEMO_PASSWORD.
+// Each sector's field worker logs in to the driver app with  driver-<sector>@demo.q8hub.com  and DEMO_PASSWORD, or, without
+// DEMO_PASSWORD, the SHARE_WITH account is the owner and the field worker of every demo company.
 // Nothing is deleted; running it again adds another set of companies, and a demo driver who then has several companies picks one in the app.
 //
 //   API_URL=https://api.q8hub.com OWNER_EMAIL=you@example.com OWNER_PASSWORD=... DEMO_PASSWORD=... node scripts/demo-seed.mjs [sector,sector|all]
 //   (locally with phone login: API_URL=http://localhost:3000 OWNER_PHONE=+96550000000 DEMO_PASSWORD=... node scripts/demo-seed.mjs)
 
 const API = process.env.API_URL ?? 'http://localhost:3000';
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
-if (!DEMO_PASSWORD || DEMO_PASSWORD.length < 8) throw new Error('DEMO_PASSWORD (8+ characters) is required: the drivers of the demo companies log in with it');
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD || undefined;
+const SHARE_WITH = process.env.SHARE_WITH || undefined;
+if (DEMO_PASSWORD !== undefined && DEMO_PASSWORD.length < 8) throw new Error('DEMO_PASSWORD must be 8+ characters');
+// Without DEMO_PASSWORD the SHARE_WITH account is each company's owner and also its first field worker, so that person
+// logs in to the office and to the driver app with their own password (picking the company in the app).
+if (!DEMO_PASSWORD && !SHARE_WITH) throw new Error('DEMO_PASSWORD (8+ characters) or SHARE_WITH (an existing email account) is required');
 const stamp = String(Date.now()).slice(-5);
 
 async function call(method, path, body, token) {
@@ -287,17 +292,20 @@ for (const code of names) {
   try {
     const co = await call('POST', '/v1/tenants', { name: `عرض: ${label}`, packs }, user);
     const T = co.access_token, le = co.legal_entity_id;
-    let first = true;
-    const w = async (kind, name, login = true) => {
-      const email = login && first ? `driver-${code}@demo.q8hub.com` : undefined;
-      if (email) first = false;
-      return call('POST', '/v1/workers', { legal_entity_id: le, kind, display_name: name, ...(email ? { email, password: DEMO_PASSWORD } : {}) }, T);
+    if (SHARE_WITH) await call('POST', '/v1/members', { email: SHARE_WITH, role_code: 'owner' }, T);
+    let first = true, login = null;
+    const w = async (kind, name, wantLogin = true) => {
+      let cred = {};
+      if (wantLogin && first) {
+        first = false;
+        cred = DEMO_PASSWORD ? { email: `driver-${code}@demo.q8hub.com`, password: DEMO_PASSWORD } : { email: SHARE_WITH };
+        login = cred.email;
+      }
+      return call('POST', '/v1/workers', { legal_entity_id: le, kind, display_name: name, ...cred }, T);
     };
     await seed({ T, le, w });
-    // SHARE_WITH: an existing email account that should see the demo companies in the office (as admin)
-    if (process.env.SHARE_WITH) await call('POST', '/v1/members', { email: process.env.SHARE_WITH, role_code: 'admin' }, T);
     done.push(code);
-    console.log(`✓ ${label} (${code}): driver-${code}@demo.q8hub.com`);
+    console.log(`✓ ${label} (${code}): app login ${login}`);
   } catch (e) {
     console.log(`✗ ${label} (${code}): ${e.message}`);
     process.exitCode = 1;
