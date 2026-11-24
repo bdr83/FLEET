@@ -8,6 +8,9 @@ on:
         description: 'القطاعات: all أو أسماء مفصولة بفواصل (taxi,school)'
         default: all
         required: true
+      share_with:
+        description: 'إيميل حساب موجود يرى شركات العرض في لوحة التحكم (مدير)'
+        required: false
 jobs:
   seed:
     runs-on: ubuntu-latest
@@ -24,6 +27,7 @@ jobs:
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
           SECTORS: ${{ inputs.sectors }}
           OWNER_REGISTER: '1'
+          SHARE_WITH: ${{ inputs.share_with }}
         run: |
           [ -n "$OWNER_EMAIL" ] && [ -n "$OWNER_PASSWORD" ] && [ -n "$DEMO_PASSWORD" ] || { echo "add the secrets DEMO_OWNER_EMAIL, DEMO_OWNER_PASSWORD and DEMO_PASSWORD first"; exit 1; }
           node scripts/demo-seed.mjs "$SECTORS"

@@ -294,6 +294,8 @@ for (const code of names) {
       return call('POST', '/v1/workers', { legal_entity_id: le, kind, display_name: name, ...(email ? { email, password: DEMO_PASSWORD } : {}) }, T);
     };
     await seed({ T, le, w });
+    // SHARE_WITH: an existing email account that should see the demo companies in the office (as admin)
+    if (process.env.SHARE_WITH) await call('POST', '/v1/members', { email: process.env.SHARE_WITH, role_code: 'admin' }, T);
     done.push(code);
     console.log(`✓ ${label} (${code}): driver-${code}@demo.q8hub.com`);
   } catch (e) {
