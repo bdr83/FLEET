@@ -279,15 +279,15 @@ export class DeliveryController {
     return this.db.withTenant(a, async (c) => ({
       from: f, to: t,
       data: (await c.query(
-        `WITH ev AS (
-           SELECT w.id AS worker_id, e.to_status FROM ops.task_event e
-             JOIN ops.task tk ON tk.id = e.task_id AND tk.sector_pack = $3
-             JOIN workforce.worker w ON w.user_id = e.actor_id
+        `WITH ev AS MATERIALIZED (
+           -- counted per user first, then matched to workers: joining workers first made the planner scan the events once per worker
+           SELECT e.actor_id, count(*) FILTER (WHERE e.to_status = 'completed')::int AS delivered, count(*) FILTER (WHERE e.to_status = 'failed')::int AS failed
+             FROM ops.task_event e JOIN ops.task tk ON tk.id = e.task_id AND tk.sector_pack = $3
             WHERE e.actor_type = 'driver' AND e.to_status IN ('completed','failed') AND e.occurred_at >= $1 AND e.occurred_at < $2
+            GROUP BY e.actor_id
          ), cnt AS (
-           SELECT worker_id, count(*) FILTER (WHERE to_status = 'completed')::int AS delivered, count(*) FILTER (WHERE to_status = 'failed')::int AS failed
-             FROM ev GROUP BY worker_id
-         ), cod AS (
+           SELECT w.id AS worker_id, ev.delivered, ev.failed FROM ev JOIN workforce.worker w ON w.user_id = ev.actor_id
+         ), cod AS MATERIALIZED (
            SELECT worker_id, sum(amount) AS collected FROM billing.cod_collection WHERE collected_at >= $1 AND collected_at < $2 GROUP BY worker_id
          )
          SELECT w.id AS worker_id, w.display_name, COALESCE(cnt.delivered, 0) AS delivered, COALESCE(cnt.failed, 0) AS failed,

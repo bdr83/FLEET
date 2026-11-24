@@ -1,0 +1,28 @@
+# بيانات العرض على الموقع الحي: شركة عرض لكل قطاع تحت حساب المالك (scripts/demo-seed.mjs). يُشغَّل يدويًا فقط.
+# الأسرار المطلوبة في المستودع: DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD (حساب المالك) وDEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر).
+name: demo-seed
+on:
+  workflow_dispatch:
+    inputs:
+      sectors:
+        description: 'القطاعات: all أو أسماء مفصولة بفواصل (taxi,school)'
+        default: all
+        required: true
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Create the demo companies
+        env:
+          API_URL: https://api.q8hub.com
+          OWNER_EMAIL: ${{ secrets.DEMO_OWNER_EMAIL }}
+          OWNER_PASSWORD: ${{ secrets.DEMO_OWNER_PASSWORD }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+          SECTORS: ${{ inputs.sectors }}
+        run: |
+          [ -n "$OWNER_EMAIL" ] && [ -n "$OWNER_PASSWORD" ] && [ -n "$DEMO_PASSWORD" ] || { echo "add the secrets DEMO_OWNER_EMAIL, DEMO_OWNER_PASSWORD and DEMO_PASSWORD first"; exit 1; }
+          node scripts/demo-seed.mjs "$SECTORS"
