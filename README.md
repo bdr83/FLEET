@@ -52,6 +52,8 @@ API_URL=https://api.q8hub.com OWNER_EMAIL=... OWNER_PASSWORD=... DEMO_PASSWORD=.
 node scripts/demo-seed.mjs taxi,school   # قطاعات محددة
 ```
 
+أو من GitHub: Actions ثم demo-seed ثم Run workflow، بعد إضافة الأسرار `DEMO_OWNER_EMAIL` و`DEMO_OWNER_PASSWORD` و`DEMO_PASSWORD` في إعدادات المستودع.
+
 ## واجهات P1
 
 انظر [docs/api.md](docs/api.md).
