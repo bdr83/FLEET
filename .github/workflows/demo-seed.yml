@@ -1,6 +1,6 @@
 # بيانات العرض على الموقع الحي: شركة عرض لكل قطاع تحت حساب المالك (scripts/demo-seed.mjs). يُشغَّل يدويًا فقط.
-# السر المطلوب: DEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر). مع share_with (إيميل دخولك) يُنشأ حساب مالك للتشغيل وحده
-# وتصلك الشركات مديرًا؛ أو أضف DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD لحساب مالك ثابت (يُنشأ في أول تشغيل إن لم يوجد).
+# مع share_with (إيميل دخولك) يُنشأ حساب مالك للتشغيل وحده، وتصلك الشركات مالكًا، وتكون أنت سائق العرض في كل شركة فتدخل
+# التطبيق بكلمة سرك (السر DEMO_PASSWORD اختياري: يجعل لكل قطاع سائقًا منفصلًا driver-<القطاع>@demo.q8hub.com)؛ أو أضف DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD لحساب مالك ثابت (يُنشأ في أول تشغيل إن لم يوجد).
 name: demo-seed
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
         default: all
         required: true
       share_with:
-        description: 'إيميل حساب موجود يرى شركات العرض في لوحة التحكم (مدير)'
+        description: 'إيميل حسابك: تصلك شركات العرض مالكًا وتدخل التطبيق سائقًا'
         required: false
 jobs:
   seed:
@@ -30,7 +30,6 @@ jobs:
           OWNER_REGISTER: '1'
           SHARE_WITH: ${{ inputs.share_with }}
         run: |
-          [ -n "$DEMO_PASSWORD" ] || { echo "add the repository secret DEMO_PASSWORD (the demo drivers' password, 8+ characters) first"; exit 1; }
           if [ -z "$OWNER_EMAIL" ]; then
             # no owner secrets: a fresh owner account for this run only; the companies are reached through share_with
             [ -n "$SHARE_WITH" ] || { echo "without the DEMO_OWNER_* secrets, share_with (your login email) is required"; exit 1; }
