@@ -1,5 +1,6 @@
 # بيانات العرض على الموقع الحي: شركة عرض لكل قطاع تحت حساب المالك (scripts/demo-seed.mjs). يُشغَّل يدويًا فقط.
-# الأسرار المطلوبة في المستودع: DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD (حساب مالك شركات العرض، يُنشأ في أول تشغيل إن لم يوجد) وDEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر).
+# السر المطلوب: DEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر). مع share_with (إيميل دخولك) يُنشأ حساب مالك للتشغيل وحده
+# وتصلك الشركات مديرًا؛ أو أضف DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD لحساب مالك ثابت (يُنشأ في أول تشغيل إن لم يوجد).
 name: demo-seed
 on:
   workflow_dispatch:
@@ -29,5 +30,11 @@ jobs:
           OWNER_REGISTER: '1'
           SHARE_WITH: ${{ inputs.share_with }}
         run: |
-          [ -n "$OWNER_EMAIL" ] && [ -n "$OWNER_PASSWORD" ] && [ -n "$DEMO_PASSWORD" ] || { echo "add the secrets DEMO_OWNER_EMAIL, DEMO_OWNER_PASSWORD and DEMO_PASSWORD first"; exit 1; }
+          [ -n "$DEMO_PASSWORD" ] || { echo "add the repository secret DEMO_PASSWORD (the demo drivers' password, 8+ characters) first"; exit 1; }
+          if [ -z "$OWNER_EMAIL" ]; then
+            # no owner secrets: a fresh owner account for this run only; the companies are reached through share_with
+            [ -n "$SHARE_WITH" ] || { echo "without the DEMO_OWNER_* secrets, share_with (your login email) is required"; exit 1; }
+            OWNER_EMAIL="owner-${GITHUB_RUN_ID}@demo.q8hub.com"; OWNER_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=\n')
+            echo "::add-mask::$OWNER_PASSWORD"; export OWNER_EMAIL OWNER_PASSWORD
+          fi
           node scripts/demo-seed.mjs "$SECTORS"
