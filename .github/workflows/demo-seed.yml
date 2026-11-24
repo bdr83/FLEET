@@ -1,5 +1,5 @@
 # بيانات العرض على الموقع الحي: شركة عرض لكل قطاع تحت حساب المالك (scripts/demo-seed.mjs). يُشغَّل يدويًا فقط.
-# الأسرار المطلوبة في المستودع: DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD (حساب المالك) وDEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر).
+# الأسرار المطلوبة في المستودع: DEMO_OWNER_EMAIL وDEMO_OWNER_PASSWORD (حساب مالك شركات العرض، يُنشأ في أول تشغيل إن لم يوجد) وDEMO_PASSWORD (كلمة سائقي العرض، 8 أحرف فأكثر).
 name: demo-seed
 on:
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
           OWNER_PASSWORD: ${{ secrets.DEMO_OWNER_PASSWORD }}
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
           SECTORS: ${{ inputs.sectors }}
+          OWNER_REGISTER: '1'
         run: |
           [ -n "$OWNER_EMAIL" ] && [ -n "$OWNER_PASSWORD" ] && [ -n "$DEMO_PASSWORD" ] || { echo "add the secrets DEMO_OWNER_EMAIL, DEMO_OWNER_PASSWORD and DEMO_PASSWORD first"; exit 1; }
           node scripts/demo-seed.mjs "$SECTORS"

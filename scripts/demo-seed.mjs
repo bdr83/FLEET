@@ -20,7 +20,16 @@ async function call(method, path, body, token) {
   return d;
 }
 async function ownerToken() {
-  if (process.env.OWNER_EMAIL) return (await call('POST', '/v1/auth/login', { email: process.env.OWNER_EMAIL, password: process.env.OWNER_PASSWORD })).user_token;
+  if (process.env.OWNER_EMAIL) {
+    const cred = { email: process.env.OWNER_EMAIL, password: process.env.OWNER_PASSWORD };
+    try {
+      return (await call('POST', '/v1/auth/login', cred)).user_token;
+    } catch (e) {
+      // OWNER_REGISTER=1: a dedicated demo owner account is created on the first run
+      if (process.env.OWNER_REGISTER !== '1' || !String(e.message).includes('→ 401')) throw e;
+      return (await call('POST', '/v1/auth/register', { ...cred, display_name: 'حساب العرض' })).user_token;
+    }
+  }
   const phone = process.env.OWNER_PHONE;
   if (!phone) throw new Error('OWNER_EMAIL and OWNER_PASSWORD (or OWNER_PHONE on a server with OTP_DEV_ECHO) are required');
   const r = await call('POST', '/v1/auth/otp/request', { phone });
