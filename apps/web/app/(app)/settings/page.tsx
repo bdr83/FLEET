@@ -4,14 +4,16 @@ import { api, ApiError } from '@/lib/api';
 import { dt, PACK_INFO, ROLE } from '@/lib/format';
 import { can, useMe } from '@/components/me';
 import { Badge, clean, Empty, ErrorBox, Modal, Tabs, useAction, useForm, useLoad } from '@/components/ui';
+import { OdooLink } from './odoo';
 
-type Tab = 'company' | 'packs' | 'members' | 'branches' | 'audit' | 'account';
+type Tab = 'company' | 'packs' | 'odoo' | 'members' | 'branches' | 'audit' | 'account';
 
 export default function SettingsPage() {
   const me = useMe();
   const tabs: [Tab, string][] = [['company', 'الشركة والفوترة'], ['branches', 'الفروع']];
   if (can(me, 'members:read')) tabs.splice(1, 0, ['members', 'المستخدمون والصلاحيات']), tabs.push(['audit', 'سجل التدقيق']);
   tabs.splice(1, 0, ['packs', 'الأنشطة']);
+  if (can(me, 'billing:read')) tabs.push(['odoo', 'الربط مع Odoo']);
   tabs.push(['account', 'حسابي']);
   const [tab, setTab] = useState<Tab>('company');
   return (
@@ -20,6 +22,7 @@ export default function SettingsPage() {
       <Tabs<Tab> tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'company' && <Company />}
       {tab === 'packs' && <Packs />}
+      {tab === 'odoo' && <OdooLink />}
       {tab === 'members' && <Members />}
       {tab === 'branches' && <Branches />}
       {tab === 'audit' && <Audit />}

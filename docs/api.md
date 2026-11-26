@@ -790,3 +790,22 @@ owner (كل شيء)، admin، dispatcher، accountant، branch_supervisor، driv
 
 رموز الرفض: `litres_required`، `over_capacity`، `more_than_loaded`، `receiver_required`.
 
+
+## الربط مع Odoo للمحاسبة `/v1/integrations/odoo`
+
+كل قيد في دفترنا (فاتورة، دفعة، مصروف، تحصيل COD، وعكسها) يُرسل إلى Odoo الخاص بالشركة كقيد يومية مرحّل (`account.move`) مرة واحدة. منصتنا مصدر الحقيقة، وOdoo نسخة محاسبية. الربط لكل شركة قانونية واختياري.
+
+| المسار | الوصف |
+|---|---|
+| `GET ?legal_entity_id=` | `billing:read`. الإعداد بدون المفتاح (`has_key`)، حساباتنا للربط، العدادات `sent/failed/waiting`، وآخر 20 قيدًا متعذرًا مع السبب |
+| `PUT` | `org:write`. `{legal_entity_id, protocol: json2\|jsonrpc, base_url, database?, login? (jsonrpc), api_key (عند الإنشاء، اختياري بعده), journal_id, account_map {رمزنا: رمز Odoo}, sync_from, enabled?}` |
+| `POST /test` | `org:write`. يتصل ويتحقق من الدفتر وعملة الشركة والحسابات المربوطة |
+| `POST /sync` | `billing:write`. يرسل الآن حتى 100 قيد |
+| `POST /retry` | `billing:write`. يعيد القيود المتعذرة للطابور فورًا |
+
+- **النقل:** JSON-2 (`POST /json/2/<model>/<method>` مع `Authorization: bearer <key>`) لـ Odoo 19 فأحدث، وJSON-RPC للنسخ 17 و18 (يزيله Odoo في النسخة 22).
+- **منع التكرار:** يحمل القيد في Odoo `ref = fleet:<journal id>`، ويُبحث عنه قبل الإنشاء، فإعادة المحاولة بعد انقطاع لا تكرر القيد. العميل يصبح `res.partner` بـ `ref = fleet:<customer id>`.
+- **المحاولات:** القيد المتعذر يُعاد بعد 2 ثم 4 ثم 8 دقائق حتى 6 ساعات. رفض المفتاح أو تعذر الاتصال يوقف الدورة ويظهر على الربط، والقيود تبقى بالانتظار.
+- **التشغيل:** المزامنة داخل الـ API كل 5 دقائق (`ODOO_SYNC_EVERY_MS`)، و`ODOO_SYNC_DISABLED=1` يوقفها.
+- **الأمان:** المفتاح مشفّر AES-256-GCM بمفتاح من `ODOO_SECRET_KEY` أو مشتق من `AUTH_JWT_SECRET` (تغييره يعني إعادة إدخال المفاتيح). الرابط يجب أن يكون https ولا يشير لعنوان داخلي (`ODOO_ALLOW_PRIVATE=1` للاختبار المحلي فقط).
+- **الحدود الحالية:** العملة يُفترض أنها عملة شركة Odoo نفسها (الاختبار ينبّه إذا اختلفت). المزامنة باتجاه واحد من منصتنا إلى Odoo.
