@@ -58,9 +58,11 @@ import { FilesController, MAX_FILE_BYTES } from './files/files.controller';
 import { raw } from 'express';
 import { MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
 import { MaintenanceService } from './maintenance/maintenance.service';
+import { OdooController } from './integrations/odoo/odoo.controller';
+import { OdooSyncService } from './integrations/odoo/odoo.sync';
 
 @Module({
-  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, ConcreteController, StaffingController, InternalController, DistributionController, FreightController, ColdchainController, CourierController, WarehouseController, EcommerceController, EcomApiController, ShuttleController, EquipmentController, RentalController, ServiceController, MovingController, ContainersController, TankersController, SchoolController, TaxiController, TourController, OilgasController, CranesController, WasteController, UtilitiesController, SecurityController, PestController, LandscapeController, TrackController, FilesController, TasksController],
+  controllers: [HealthController, AuthController, TenantsController, MembersController, OrgController, AssetsController, WorkersController, DocumentsController, DriverController, DispatchController, TrackingController, ReportsController, CustomersController, ContractsController, PortalController, MaintenanceController, ExpensesController, InvoicesController, PaymentsController, DeliveryController, ConcreteController, StaffingController, InternalController, DistributionController, FreightController, ColdchainController, CourierController, WarehouseController, EcommerceController, EcomApiController, ShuttleController, EquipmentController, RentalController, ServiceController, MovingController, ContainersController, TankersController, SchoolController, TaxiController, TourController, OilgasController, CranesController, WasteController, UtilitiesController, SecurityController, PestController, LandscapeController, TrackController, FilesController, OdooController, TasksController],
   providers: [
     DbService,
     OtpService,
@@ -68,6 +70,7 @@ import { MaintenanceService } from './maintenance/maintenance.service';
     SessionService,
     AuthGuard,
     MaintenanceService,
+    OdooSyncService,
     { provide: SMS_SENDER, useFactory: () => smsSenderFromEnv() },
     { provide: MAIL_SENDER, useFactory: () => mailSenderFromEnv() },
   ],
